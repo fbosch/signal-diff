@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@signal-diff/core": ["packages/core/src/index.ts"],
+      "@signal-diff/adapter-typescript": [
+        "packages/adapter-typescript/src/index.ts"
+      ],
+      "@signal-diff/heuristics": ["packages/heuristics/src/index.ts"],
+      "@signal-diff/reporting": ["packages/reporting/src/index.ts"],
+      "@signal-diff/cli": ["packages/cli/src/index.ts"]
+    }
+  }
+}
