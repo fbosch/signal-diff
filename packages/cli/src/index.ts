@@ -29,10 +29,13 @@ export interface GitReviewRequestInput extends GitRepoContextInput {
   includeDiffHunks: boolean
 }
 
+const GIT_OUTPUT_MAX_BUFFER_BYTES = 16 * 1024 * 1024
+
 function runGitCommand(repoRoot: string, args: string[]): string {
   return execFileSync("git", args, {
     cwd: repoRoot,
     encoding: "utf8",
+    maxBuffer: GIT_OUTPUT_MAX_BUFFER_BYTES,
   }).trimEnd()
 }
 
@@ -169,6 +172,7 @@ function loadDiffHunkReferencesFromGit(
     "diff",
     "--no-color",
     "--no-ext-diff",
+    "--no-renames",
     "--unified=0",
     baseRef,
     headRef,
