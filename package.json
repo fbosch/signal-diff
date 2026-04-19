@@ -12,7 +12,7 @@
     "clean": "tsc -b --clean",
     "lint": "biome check .",
     "pretest": "pnpm build",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {
