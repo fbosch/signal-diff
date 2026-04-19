@@ -1,4 +1,11 @@
-import type { CanonicalEntity } from "@signal-diff/core"
+import type {
+  CanonicalEntity,
+  EntityChange,
+  ExtractionAdapter,
+  ExtractionResult,
+  ReviewRequest,
+} from "@signal-diff/core"
+import { createEmptyCanonicalFeatures } from "@signal-diff/core"
 
 export interface TypeScriptAdapterInput {
   filePath: string
@@ -8,9 +15,75 @@ export function createTypeScriptStubEntity(
   input: TypeScriptAdapterInput,
 ): CanonicalEntity {
   return {
-    id: `ts:${input.filePath}`,
+    id: `ts:${input.filePath}#module`,
     kind: "module",
     name: input.filePath,
-    path: input.filePath,
+    modulePath: input.filePath,
+    exported: true,
+    location: {
+      filePath: input.filePath,
+      startLine: 1,
+      endLine: 1,
+    },
+    features: createEmptyCanonicalFeatures(input.filePath),
   }
+}
+
+export function createTypeScriptStubChange(
+  entity: CanonicalEntity,
+): EntityChange {
+  return {
+    id: `change:${entity.id}`,
+    entityId: entity.id,
+    kind: "entity_modified",
+    summary: `Detected a changed module at ${entity.modulePath}.`,
+    featureDeltas: {
+      summary: ["Changed module detected from diff scope."],
+      signature: {},
+      structural: {},
+      behavioral: {},
+      topology: {},
+    },
+  }
+}
+
+export function createTypeScriptStubExtractionResult(
+  request: ReviewRequest,
+): ExtractionResult {
+  const firstChangedFile = request.repoContext.changedFiles[0]
+
+  if (firstChangedFile === undefined) {
+    return {
+      repoContext: request.repoContext,
+      entities: [],
+      relationships: [],
+      changes: [],
+      diffReferences: [],
+    }
+  }
+
+  const entity = createTypeScriptStubEntity({ filePath: firstChangedFile.path })
+
+  return {
+    repoContext: request.repoContext,
+    entities: [entity],
+    relationships: [],
+    changes: [createTypeScriptStubChange(entity)],
+    diffReferences: [
+      {
+        filePath: firstChangedFile.path,
+        baseStartLine: 1,
+        baseLineCount: 1,
+        headStartLine: 1,
+        headLineCount: 1,
+      },
+    ],
+  }
+}
+
+export const typeScriptExtractionAdapter: ExtractionAdapter = {
+  language: "typescript",
+  extract(request: ReviewRequest): ExtractionResult {
+    return createTypeScriptStubExtractionResult(request)
+  },
 }
