@@ -276,7 +276,10 @@ export interface RepoContext {
   workspaceRoots: string[]
   baseRef: string
   headRef: string
+  resolvedBaseRef?: string
+  resolvedHeadRef?: string
   changedFiles: ChangedFile[]
+  diffReferences?: DiffHunkReference[]
 }
 
 export interface ReviewRequest {

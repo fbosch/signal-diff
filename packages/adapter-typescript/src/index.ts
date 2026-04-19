@@ -103,13 +103,14 @@ export function createTypeScriptStubExtractionResult(
   const diffReferences =
     request.includeDiffHunks === false
       ? []
-      : request.repoContext.changedFiles.map((changedFile) => ({
+      : (request.repoContext.diffReferences ??
+        request.repoContext.changedFiles.map((changedFile) => ({
           filePath: changedFile.path,
           baseStartLine: 1,
           baseLineCount: 1,
           headStartLine: 1,
           headLineCount: 1,
-        }))
+        })))
 
   return {
     repoContext: request.repoContext,
