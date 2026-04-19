@@ -45,9 +45,15 @@ export function assertGoldenJson(
   const actual = `${JSON.stringify(value, null, 2)}\n`
   const goldenPath = path.join(fixtureCase.rootDir, "golden", relativePath)
 
-  if (UPDATE_GOLDENS || existsSync(goldenPath) === false) {
+  if (UPDATE_GOLDENS) {
     mkdirSync(path.dirname(goldenPath), { recursive: true })
     writeFileSync(goldenPath, actual)
+  }
+
+  if (existsSync(goldenPath) === false) {
+    throw new Error(
+      `Missing golden file: ${goldenPath}. Re-run with UPDATE_GOLDENS=1 to create or refresh goldens.`,
+    )
   }
 
   const expected = readFileSync(goldenPath, "utf8")
@@ -62,9 +68,15 @@ export function assertGoldenText(
 ): void {
   const goldenPath = path.join(fixtureCase.rootDir, "golden", relativePath)
 
-  if (UPDATE_GOLDENS || existsSync(goldenPath) === false) {
+  if (UPDATE_GOLDENS) {
     mkdirSync(path.dirname(goldenPath), { recursive: true })
     writeFileSync(goldenPath, actual)
+  }
+
+  if (existsSync(goldenPath) === false) {
+    throw new Error(
+      `Missing golden file: ${goldenPath}. Re-run with UPDATE_GOLDENS=1 to create or refresh goldens.`,
+    )
   }
 
   const expected = readFileSync(goldenPath, "utf8")
