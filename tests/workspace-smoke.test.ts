@@ -90,6 +90,33 @@ test("reporting validates serialized v1 JSON output", () => {
   assert.equal(parsed.schema_version, REVIEW_JSON_SCHEMA_VERSION)
 })
 
+test("reporting rejects malformed nested v1 JSON payloads", () => {
+  assert.throws(
+    () =>
+      assertReviewJsonReportV1({
+        schema_version: REVIEW_JSON_SCHEMA_VERSION,
+        summary: {
+          changed_file_count: 1,
+          changed_entity_count: 1,
+          top_finding_ids: [123],
+        },
+        changed_entities: [
+          {
+            id: "entity:1",
+            kind: "module",
+            name: "name",
+            module_path: "path.ts",
+            exported: true,
+          },
+        ],
+        findings: [],
+        evidence: [],
+        diff_references: [],
+      }),
+    TypeError,
+  )
+})
+
 test("stub extraction covers every changed file in the request", () => {
   const reviewSurface = buildStubReviewSurfaceFromRequest({
     repoContext: {

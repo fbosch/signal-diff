@@ -51,6 +51,91 @@ export interface ReviewJsonReportV1 {
   diff_references: DiffHunkReference[]
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
+function isDiffHunkReference(value: unknown): value is DiffHunkReference {
+  if (isRecord(value) === false) {
+    return false
+  }
+
+  return (
+    typeof value.filePath === "string" &&
+    typeof value.baseStartLine === "number" &&
+    typeof value.baseLineCount === "number" &&
+    typeof value.headStartLine === "number" &&
+    typeof value.headLineCount === "number"
+  )
+}
+
+function isReviewJsonSummaryV1(value: unknown): value is ReviewJsonSummaryV1 {
+  if (isRecord(value) === false) {
+    return false
+  }
+
+  return (
+    typeof value.changed_file_count === "number" &&
+    typeof value.changed_entity_count === "number" &&
+    typeof value.finding_count === "number" &&
+    isStringArray(value.top_finding_ids)
+  )
+}
+
+function isReviewJsonChangedEntityV1(
+  value: unknown,
+): value is ReviewJsonChangedEntityV1 {
+  if (isRecord(value) === false) {
+    return false
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.name === "string" &&
+    typeof value.module_path === "string" &&
+    typeof value.exported === "boolean"
+  )
+}
+
+function isReviewJsonFindingV1(value: unknown): value is ReviewJsonFindingV1 {
+  if (isRecord(value) === false) {
+    return false
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.priority === "string" &&
+    typeof value.title === "string" &&
+    typeof value.description === "string" &&
+    isStringArray(value.evidence_ids)
+  )
+}
+
+function isReviewJsonEvidenceV1(value: unknown): value is ReviewJsonEvidenceV1 {
+  if (isRecord(value) === false) {
+    return false
+  }
+
+  return (
+    typeof value.id === "string" &&
+    isStringArray(value.changed_entity_ids) &&
+    isStringArray(value.related_entity_ids) &&
+    isStringArray(value.peer_anchor_entity_ids) &&
+    isStringArray(value.companion_entity_ids) &&
+    isStringArray(value.relationship_ids) &&
+    isStringArray(value.change_ids) &&
+    Array.isArray(value.diff_hunks) &&
+    value.diff_hunks.every((diffHunk) => isDiffHunkReference(diffHunk)) &&
+    isStringArray(value.supporting_notes)
+  )
+}
+
 export function createReviewJsonReportV1(
   reviewSurface: ReviewSurface,
 ): ReviewJsonReportV1 {
@@ -95,20 +180,25 @@ export function createReviewJsonReportV1(
 export function isReviewJsonReportV1(
   value: unknown,
 ): value is ReviewJsonReportV1 {
-  if (typeof value !== "object" || value === null) {
+  if (isRecord(value) === false) {
     return false
   }
 
-  const candidate = value as Partial<ReviewJsonReportV1>
-
   return (
-    candidate.schema_version === REVIEW_JSON_SCHEMA_VERSION &&
-    typeof candidate.summary === "object" &&
-    candidate.summary !== null &&
-    Array.isArray(candidate.changed_entities) &&
-    Array.isArray(candidate.findings) &&
-    Array.isArray(candidate.evidence) &&
-    Array.isArray(candidate.diff_references)
+    value.schema_version === REVIEW_JSON_SCHEMA_VERSION &&
+    isReviewJsonSummaryV1(value.summary) &&
+    Array.isArray(value.changed_entities) &&
+    value.changed_entities.every((entity) =>
+      isReviewJsonChangedEntityV1(entity),
+    ) &&
+    Array.isArray(value.findings) &&
+    value.findings.every((finding) => isReviewJsonFindingV1(finding)) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every((evidence) => isReviewJsonEvidenceV1(evidence)) &&
+    Array.isArray(value.diff_references) &&
+    value.diff_references.every((diffReference) =>
+      isDiffHunkReference(diffReference),
+    )
   )
 }
 
