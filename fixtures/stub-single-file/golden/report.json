@@ -1,0 +1,60 @@
+{
+  "schema_version": "v1alpha1",
+  "summary": {
+    "changed_file_count": 1,
+    "changed_entity_count": 1,
+    "finding_count": 1,
+    "top_finding_ids": ["finding:changed-module"]
+  },
+  "changed_entities": [
+    {
+      "id": "ts:packages/core/src/index.ts#module",
+      "kind": "module",
+      "name": "packages/core/src/index.ts",
+      "module_path": "packages/core/src/index.ts",
+      "exported": true
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding:changed-module",
+      "kind": "elevated_review_priority",
+      "priority": "low",
+      "title": "Changed module requires review",
+      "description": "Detected 1 changed canonical entity.",
+      "evidence_ids": ["evidence:changed-entities"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence:changed-entities",
+      "changed_entity_ids": ["ts:packages/core/src/index.ts#module"],
+      "related_entity_ids": [],
+      "peer_anchor_entity_ids": [],
+      "companion_entity_ids": [],
+      "relationship_ids": [],
+      "change_ids": ["change:ts:packages/core/src/index.ts#module"],
+      "diff_hunks": [
+        {
+          "filePath": "packages/core/src/index.ts",
+          "baseStartLine": 1,
+          "baseLineCount": 1,
+          "headStartLine": 1,
+          "headLineCount": 1
+        }
+      ],
+      "supporting_notes": [
+        "Stub heuristic wires canonical change and diff evidence through the core review model."
+      ]
+    }
+  ],
+  "diff_references": [
+    {
+      "filePath": "packages/core/src/index.ts",
+      "baseStartLine": 1,
+      "baseLineCount": 1,
+      "headStartLine": 1,
+      "headLineCount": 1
+    }
+  ]
+}
