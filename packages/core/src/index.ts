@@ -227,7 +227,8 @@ export interface EntityChange {
   featureDeltas: FeatureDeltaSet
 }
 
-export interface EvidenceReference {
+export interface ReviewEvidence {
+  id: string
   changedEntityIds: string[]
   relatedEntityIds: string[]
   peerAnchorEntityIds: string[]
@@ -244,7 +245,7 @@ export interface ReviewFinding {
   priority: ReviewPriority
   title: string
   description: string
-  evidence: EvidenceReference
+  evidenceIds: string[]
 }
 
 export interface ReviewOverview {
@@ -261,6 +262,7 @@ export interface ReviewSurface {
   relationships: CanonicalRelationship[]
   changes: EntityChange[]
   findings: ReviewFinding[]
+  evidence: ReviewEvidence[]
   diffReferences: DiffHunkReference[]
 }
 
@@ -307,7 +309,12 @@ export interface HeuristicContext {
 
 export interface Heuristic {
   id: string
-  analyze(context: HeuristicContext): ReviewFinding[]
+  analyze(context: HeuristicContext): HeuristicResult
+}
+
+export interface HeuristicResult {
+  findings: ReviewFinding[]
+  evidence: ReviewEvidence[]
 }
 
 export interface ReportRenderer {
@@ -431,6 +438,7 @@ export function createEmptyReviewSurface(): ReviewSurface {
     relationships: [],
     changes: [],
     findings: [],
+    evidence: [],
     diffReferences: [],
   }
 }
@@ -440,12 +448,20 @@ export function createReviewOverview(
   changedEntityCount: number,
   findings: ReviewFinding[],
 ): ReviewOverview {
+  const priorityOrder: ReviewPriority[] = ["high", "medium", "low"]
+  const highestPriority = priorityOrder.find((priority) =>
+    findings.some((finding) => finding.priority === priority),
+  )
+
   return {
     changedFileCount,
     changedEntityCount,
     topFindingCount: findings.length,
-    highestPriorityFindings: findings
-      .filter((finding) => finding.priority === "high")
-      .map((finding) => finding.id),
+    highestPriorityFindings:
+      highestPriority === undefined
+        ? []
+        : findings
+            .filter((finding) => finding.priority === highestPriority)
+            .map((finding) => finding.id),
   }
 }

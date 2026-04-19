@@ -21,18 +21,19 @@ export function buildStubReviewSurfaceFromRequest(
     changes: extraction.changes,
     diffReferences: extraction.diffReferences,
   }
-  const findings = stubHeuristic.analyze(heuristicContext)
+  const heuristicResult = stubHeuristic.analyze(heuristicContext)
   const reviewSurface = createEmptyReviewSurface()
 
   reviewSurface.overview = createReviewOverview(
     request.repoContext.changedFiles.length,
     extraction.entities.length,
-    findings,
+    heuristicResult.findings,
   )
   reviewSurface.entities = extraction.entities
   reviewSurface.relationships = extraction.relationships
   reviewSurface.changes = extraction.changes
-  reviewSurface.findings = findings
+  reviewSurface.findings = heuristicResult.findings
+  reviewSurface.evidence = heuristicResult.evidence
   reviewSurface.diffReferences = extraction.diffReferences
 
   return reviewSurface
