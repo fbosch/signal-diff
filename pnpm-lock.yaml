@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.0.6
         version: 2.4.12
+      '@types/node':
+        specifier: ^24.9.1
+        version: 24.12.2
       tsx:
         specifier: ^4.19.4
         version: 4.21.0
@@ -264,6 +267,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@types/node@24.12.2':
+    resolution: {integrity: sha512-A1sre26ke7HDIuY/M23nd9gfB+nrmhtYyMINbjI1zHJxYteKR6qSMX56FsmjMcDb3SMcjJg5BiRRgOCC/yBD0g==}
+
   esbuild@0.27.7:
     resolution: {integrity: sha512-IxpibTjyVnmrIQo5aqNpCgoACA/dTKLTlhMHihVHhdkxKyPO1uBBthumT0rdHmcsk9uMonIWS0m4FljWzILh3w==}
     engines: {node: '>=18'}
@@ -289,6 +295,9 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
 snapshots:
 
@@ -405,6 +414,10 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
+  '@types/node@24.12.2':
+    dependencies:
+      undici-types: 7.16.0
+
   esbuild@0.27.7:
     optionalDependencies:
       '@esbuild/aix-ppc64': 0.27.7
@@ -451,3 +464,5 @@ snapshots:
       fsevents: 2.3.3
 
   typescript@5.9.3: {}
+
+  undici-types@7.16.0: {}
