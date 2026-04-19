@@ -10,25 +10,9 @@ import {
 import { stubHeuristic } from "@signal-diff/heuristics"
 import { jsonReportRenderer } from "@signal-diff/reporting"
 
-export function buildStubReviewSurface(filePath: string): ReviewSurface {
-  const request: ReviewRequest = {
-    repoContext: {
-      repoRoot: "/repo",
-      workspaceRoots: ["/repo"],
-      baseRef: "origin/master",
-      headRef: "HEAD",
-      changedFiles: [
-        {
-          path: filePath,
-          kind: "source",
-        },
-      ],
-    },
-    format: "json",
-    maxFindings: 20,
-    includeDiffHunks: true,
-  }
-
+export function buildStubReviewSurfaceFromRequest(
+  request: ReviewRequest,
+): ReviewSurface {
   const extraction = createTypeScriptStubExtractionResult(request)
   const heuristicContext: HeuristicContext = {
     repoContext: extraction.repoContext,
@@ -54,16 +38,32 @@ export function buildStubReviewSurface(filePath: string): ReviewSurface {
   return reviewSurface
 }
 
+export function buildStubReviewSurface(filePath: string): ReviewSurface {
+  return buildStubReviewSurfaceFromRequest({
+    repoContext: {
+      repoRoot: "/repo",
+      workspaceRoots: ["/repo"],
+      baseRef: "origin/master",
+      headRef: "HEAD",
+      changedFiles: [
+        {
+          path: filePath,
+          kind: "source",
+        },
+      ],
+    },
+    format: "json",
+    maxFindings: 20,
+    includeDiffHunks: true,
+  })
+}
+
 export function buildStubCliOutput(filePath: string): string {
   return jsonReportRenderer.render(buildStubReviewSurface(filePath))
 }
 
 export const stubReviewPipeline: ReviewPipeline = {
   analyze(request: ReviewRequest): ReviewSurface {
-    if (request.repoContext.changedFiles.length === 0) {
-      return createEmptyReviewSurface()
-    }
-
-    return buildStubReviewSurface(request.repoContext.changedFiles[0].path)
+    return buildStubReviewSurfaceFromRequest(request)
   },
 }

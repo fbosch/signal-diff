@@ -50,9 +50,7 @@ export function createTypeScriptStubChange(
 export function createTypeScriptStubExtractionResult(
   request: ReviewRequest,
 ): ExtractionResult {
-  const firstChangedFile = request.repoContext.changedFiles[0]
-
-  if (firstChangedFile === undefined) {
+  if (request.repoContext.changedFiles.length === 0) {
     return {
       repoContext: request.repoContext,
       entities: [],
@@ -62,22 +60,22 @@ export function createTypeScriptStubExtractionResult(
     }
   }
 
-  const entity = createTypeScriptStubEntity({ filePath: firstChangedFile.path })
+  const entities = request.repoContext.changedFiles.map((changedFile) =>
+    createTypeScriptStubEntity({ filePath: changedFile.path }),
+  )
 
   return {
     repoContext: request.repoContext,
-    entities: [entity],
+    entities,
     relationships: [],
-    changes: [createTypeScriptStubChange(entity)],
-    diffReferences: [
-      {
-        filePath: firstChangedFile.path,
-        baseStartLine: 1,
-        baseLineCount: 1,
-        headStartLine: 1,
-        headLineCount: 1,
-      },
-    ],
+    changes: entities.map((entity) => createTypeScriptStubChange(entity)),
+    diffReferences: request.repoContext.changedFiles.map((changedFile) => ({
+      filePath: changedFile.path,
+      baseStartLine: 1,
+      baseLineCount: 1,
+      headStartLine: 1,
+      headLineCount: 1,
+    })),
   }
 }
 
