@@ -1,5 +1,36 @@
 schema: spec-driven
 
+context: |
+  Product: signal-diff.
+  Goal: zero-config local CLI for TypeScript repos that analyzes a git diff and produces a concept-first, evidence-backed review surface for human validation of AI-generated or AI-assisted code changes.
+
+  Core product constraints:
+  - v1 is heuristics-first and local CLI only.
+  - Deterministic heuristics are source of truth; AI is optional later for wording/grouping only.
+  - Every finding must link to changed entities, structural evidence, and diff hunks.
+  - JSON is the canonical output contract; markdown/text are renderings.
+  - The core architecture must stay language-agnostic through a canonical IR.
+  - v1 extraction is TypeScript-first behind a strict adapter boundary, using compiler APIs or ts-morph.
+  - No TypeScript-specific AST/compiler types may leak into core contracts.
+  - Monorepo support is a hard requirement in v1.
+
+  Canonical v1 scope from docs/SPEC.md:
+  - analyze base/head git diff for current repo
+  - parse TypeScript and TSX
+  - extract normalized entities, relationships, and features
+  - emit heuristic findings such as public contract drift, behavior shift, peer divergence, likely incomplete companion change, likely new abstraction, boundary anomaly, and elevated review priority
+  - support drill-down from findings to evidence and raw diff references
+
+  Required review flow:
+  1. Conceptual overview first
+  2. Evidence-backed finding detail second
+  3. Raw diff inspection last
+
+  Delivery conventions:
+  - Stack: Node.js, TypeScript, pnpm
+  - Tests: unit tests plus golden outputs, with fixtures and later manual evaluation on private repos
+  - Prefer minimal local changes, stable package boundaries, and explicit contracts before implementation detail
+
 # Project context (optional)
 # This is shown to AI when creating artifacts.
 # Add your tech stack, conventions, style guides, domain knowledge, etc.

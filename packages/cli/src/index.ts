@@ -1,14 +1,70 @@
-import { createTypeScriptStubEntity } from "@signal-diff/adapter-typescript"
-import { createEmptyReviewSurface } from "@signal-diff/core"
-import { inferStubFindings } from "@signal-diff/heuristics"
-import { renderReviewSurfaceJson } from "@signal-diff/reporting"
+import { createTypeScriptStubExtractionResult } from "@signal-diff/adapter-typescript"
+import {
+  createEmptyReviewSurface,
+  createReviewOverview,
+  type HeuristicContext,
+  type ReviewPipeline,
+  type ReviewRequest,
+  type ReviewSurface,
+} from "@signal-diff/core"
+import { stubHeuristic } from "@signal-diff/heuristics"
+import { jsonReportRenderer } from "@signal-diff/reporting"
 
-export function buildStubCliOutput(filePath: string): string {
-  const entity = createTypeScriptStubEntity({ filePath })
+export function buildStubReviewSurfaceFromRequest(
+  request: ReviewRequest,
+): ReviewSurface {
+  const extraction = createTypeScriptStubExtractionResult(request)
+  const heuristicContext: HeuristicContext = {
+    repoContext: extraction.repoContext,
+    entities: extraction.entities,
+    relationships: extraction.relationships,
+    changes: extraction.changes,
+    diffReferences: extraction.diffReferences,
+  }
+  const heuristicResult = stubHeuristic.analyze(heuristicContext)
   const reviewSurface = createEmptyReviewSurface()
 
-  reviewSurface.entities.push(entity)
-  reviewSurface.findings = inferStubFindings(reviewSurface.entities)
+  reviewSurface.overview = createReviewOverview(
+    request.repoContext.changedFiles.length,
+    extraction.entities.length,
+    heuristicResult.findings,
+  )
+  reviewSurface.entities = extraction.entities
+  reviewSurface.relationships = extraction.relationships
+  reviewSurface.changes = extraction.changes
+  reviewSurface.findings = heuristicResult.findings
+  reviewSurface.evidence = heuristicResult.evidence
+  reviewSurface.diffReferences = extraction.diffReferences
 
-  return renderReviewSurfaceJson(reviewSurface)
+  return reviewSurface
+}
+
+export function buildStubReviewSurface(filePath: string): ReviewSurface {
+  return buildStubReviewSurfaceFromRequest({
+    repoContext: {
+      repoRoot: "/repo",
+      workspaceRoots: ["/repo"],
+      baseRef: "origin/master",
+      headRef: "HEAD",
+      changedFiles: [
+        {
+          path: filePath,
+          kind: "source",
+        },
+      ],
+    },
+    format: "json",
+    maxFindings: 20,
+    includeDiffHunks: true,
+  })
+}
+
+export function buildStubCliOutput(filePath: string): string {
+  return jsonReportRenderer.render(buildStubReviewSurface(filePath))
+}
+
+export const stubReviewPipeline: ReviewPipeline = {
+  analyze(request: ReviewRequest): ReviewSurface {
+    return buildStubReviewSurfaceFromRequest(request)
+  },
 }
