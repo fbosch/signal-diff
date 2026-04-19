@@ -6,6 +6,12 @@ import {
   buildStubReviewSurfaceFromRequest,
   stubReviewPipeline,
 } from "../packages/cli/src/index.ts"
+import {
+  assertReviewJsonReportV1,
+  createReviewJsonReportV1,
+  REVIEW_JSON_SCHEMA_VERSION,
+  renderReviewSurfaceJson,
+} from "../packages/reporting/src/index.ts"
 
 test("workspace scaffold wires canonical review contracts across packages", () => {
   const reviewSurface = buildStubReviewSurface("packages/core/src/index.ts")
@@ -39,6 +45,75 @@ test("workspace scaffold wires canonical review contracts across packages", () =
   assert.equal(
     reviewSurface.diffReferences[0]?.filePath,
     "packages/core/src/index.ts",
+  )
+})
+
+test("reporting projects the canonical surface into the v1 JSON contract", () => {
+  const reviewSurface = buildStubReviewSurface("packages/core/src/index.ts")
+  const report = createReviewJsonReportV1(reviewSurface)
+
+  assert.equal(report.schema_version, REVIEW_JSON_SCHEMA_VERSION)
+  assert.deepEqual(report.summary, {
+    changed_file_count: 1,
+    changed_entity_count: 1,
+    finding_count: 1,
+    top_finding_ids: ["finding:changed-module"],
+  })
+  assert.deepEqual(report.changed_entities, [
+    {
+      id: "ts:packages/core/src/index.ts#module",
+      kind: "module",
+      name: "packages/core/src/index.ts",
+      module_path: "packages/core/src/index.ts",
+      exported: true,
+    },
+  ])
+  assert.deepEqual(report.findings[0]?.evidence_ids, [
+    "evidence:changed-entities",
+  ])
+  assert.deepEqual(report.evidence[0]?.changed_entity_ids, [
+    "ts:packages/core/src/index.ts#module",
+  ])
+  assert.equal(
+    report.diff_references[0]?.filePath,
+    "packages/core/src/index.ts",
+  )
+})
+
+test("reporting validates serialized v1 JSON output", () => {
+  const output = renderReviewSurfaceJson(
+    buildStubReviewSurface("packages/core/src/index.ts"),
+  )
+  const parsed = JSON.parse(output) as unknown
+
+  assertReviewJsonReportV1(parsed)
+  assert.equal(parsed.schema_version, REVIEW_JSON_SCHEMA_VERSION)
+})
+
+test("reporting rejects malformed nested v1 JSON payloads", () => {
+  assert.throws(
+    () =>
+      assertReviewJsonReportV1({
+        schema_version: REVIEW_JSON_SCHEMA_VERSION,
+        summary: {
+          changed_file_count: 1,
+          changed_entity_count: 1,
+          top_finding_ids: [123],
+        },
+        changed_entities: [
+          {
+            id: "entity:1",
+            kind: "module",
+            name: "name",
+            module_path: "path.ts",
+            exported: true,
+          },
+        ],
+        findings: [],
+        evidence: [],
+        diff_references: [],
+      }),
+    TypeError,
   )
 })
 
