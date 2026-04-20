@@ -654,13 +654,16 @@ function discoverTsconfigProjects(
           currentPath,
           referencePath,
         )
-        const referenceRelativePath = toRepoRelativePath(
-          repoRoot,
-          resolvedReference,
-        )
 
-        references.push(referenceRelativePath)
-        queueTsconfig(resolvedReference)
+        if (existsSync(resolvedReference)) {
+          const referenceRelativePath = toRepoRelativePath(
+            repoRoot,
+            resolvedReference,
+          )
+
+          references.push(referenceRelativePath)
+          queueTsconfig(resolvedReference)
+        }
       }
     }
 

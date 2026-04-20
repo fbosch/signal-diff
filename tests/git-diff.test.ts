@@ -496,6 +496,69 @@ function createExtendsAliasFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createMissingReferenceFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-missing-ref-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "missing-ref-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [
+          { path: "./packages/app" },
+          { path: "./packages/missing" },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/package.json",
+    `${JSON.stringify({ name: "app", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -726,6 +789,31 @@ test("path aliases inherit from tsconfig extends chain", () => {
     assert.deepEqual(repoContext.pathAliases, {
       "@core/*": ["packages/core/src/*"],
     })
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("missing tsconfig references are not included in project graph", () => {
+  const { repoRoot, baseRef } = createMissingReferenceFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/app/tsconfig.json",
+        references: [],
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/app/tsconfig.json"],
+      },
+    ])
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
