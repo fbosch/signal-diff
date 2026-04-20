@@ -205,6 +205,40 @@ function readJsonFile(filePath: string): unknown {
   return JSON.parse(readFileSync(filePath, "utf8"))
 }
 
+function normalizeWorkspaceRoot(
+  repoRoot: string,
+  workspaceRoot: string,
+): string {
+  const normalized = path.isAbsolute(workspaceRoot)
+    ? toRepoRelativePath(repoRoot, workspaceRoot)
+    : normalizePath(path.normalize(workspaceRoot))
+
+  const trimmed = normalized.replace(/^\.\//, "").replace(/\/$/, "")
+
+  return trimmed === "" ? "." : trimmed
+}
+
+function normalizeWorkspaceRoots(
+  repoRoot: string,
+  workspaceRoots: string[],
+): string[] {
+  const seen = new Set<string>()
+  const normalizedRoots: string[] = []
+
+  for (const workspaceRoot of workspaceRoots) {
+    const normalizedRoot = normalizeWorkspaceRoot(repoRoot, workspaceRoot)
+
+    if (seen.has(normalizedRoot)) {
+      continue
+    }
+
+    seen.add(normalizedRoot)
+    normalizedRoots.push(normalizedRoot)
+  }
+
+  return normalizedRoots
+}
+
 function discoverWorkspacePatterns(repoRoot: string): string[] {
   const patterns: string[] = []
   const pnpmWorkspaceFilePath = path.join(repoRoot, "pnpm-workspace.yaml")
@@ -394,7 +428,9 @@ function discoverTsconfigProjects(
   queueTsconfig(path.join(repoRoot, "tsconfig.json"))
 
   for (const workspaceRoot of workspaceRoots) {
-    queueTsconfig(path.join(repoRoot, workspaceRoot, "tsconfig.json"))
+    const workspaceRootPath = path.resolve(repoRoot, workspaceRoot)
+
+    queueTsconfig(path.join(workspaceRootPath, "tsconfig.json"))
   }
 
   while (queue.length > 0) {
@@ -523,10 +559,14 @@ export function loadRepoContextFromGit(input: GitRepoContextInput) {
     resolvedHeadRef,
   )
   const workspacePackages = discoverWorkspacePackages(input.repoRoot)
-  const workspaceRoots = input.workspaceRoots ?? [
-    input.repoRoot,
+  const rawWorkspaceRoots = input.workspaceRoots ?? [
+    ".",
     ...workspacePackages.map((entry) => entry.packageRoot),
   ]
+  const workspaceRoots = normalizeWorkspaceRoots(
+    input.repoRoot,
+    rawWorkspaceRoots,
+  )
   const { projects: tsconfigProjects, pathAliases } = discoverTsconfigProjects(
     input.repoRoot,
     workspaceRoots,

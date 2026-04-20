@@ -238,6 +238,67 @@ function createRecursiveWorkspaceFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createAbsoluteWorkspaceRootsFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(path.join(os.tmpdir(), "signal-diff-abs-roots-"))
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "abs-roots-fixture",
+        private: true,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify({ files: [] }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@pkg-a/*": ["src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const value = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const value = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -323,7 +384,7 @@ test("workspace discovery does not require pnpm-workspace.yaml", () => {
       { packageRoot: "packages/b" },
     ])
     assert.deepEqual(repoContext.workspaceRoots, [
-      repoRoot,
+      ".",
       "packages/a",
       "packages/b",
     ])
@@ -378,6 +439,36 @@ test("workspace discovery supports recursive ** workspace patterns", () => {
       { packageRoot: "packages/a" },
       { packageRoot: "packages/nested/b" },
     ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("tsconfig discovery supports explicit absolute workspace roots", () => {
+  const { repoRoot, baseRef } = createAbsoluteWorkspaceRootsFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+      workspaceRoots: [repoRoot, path.join(repoRoot, "packages/a")],
+    })
+
+    assert.deepEqual(repoContext.workspaceRoots, [".", "packages/a"])
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/a/tsconfig.json",
+        references: [],
+      },
+      {
+        configPath: "tsconfig.json",
+        references: [],
+      },
+    ])
+    assert.deepEqual(repoContext.pathAliases, {
+      "@pkg-a/*": ["packages/a/src/*"],
+    })
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
