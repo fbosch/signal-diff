@@ -271,6 +271,17 @@ export interface ChangedFile {
   kind: ChangedFileKind
 }
 
+export interface WorkspacePackage {
+  packageRoot: string
+}
+
+export interface TsconfigProject {
+  configPath: string
+  references: string[]
+  baseUrl?: string
+  pathAliases?: Record<string, string[]>
+}
+
 export interface RepoContext {
   repoRoot: string
   workspaceRoots: string[]
@@ -280,6 +291,8 @@ export interface RepoContext {
   resolvedHeadRef?: string
   changedFiles: ChangedFile[]
   diffReferences?: DiffHunkReference[]
+  workspacePackages?: WorkspacePackage[]
+  tsconfigProjects?: TsconfigProject[]
 }
 
 export interface ReviewRequest {
