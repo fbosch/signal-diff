@@ -245,12 +245,63 @@ function discoverWorkspacePatterns(repoRoot: string): string[] {
 
   if (existsSync(pnpmWorkspaceFilePath)) {
     const workspaceFile = readFileSync(pnpmWorkspaceFilePath, "utf8")
+    let inPackagesSection = false
+    let packagesIndent = 0
 
     for (const line of workspaceFile.split("\n")) {
-      const match = /^\s*-\s*(.+)\s*$/.exec(line)
+      const trimmedLine = line.trim()
 
-      if (match) {
-        patterns.push(match[1])
+      if (trimmedLine === "" || trimmedLine.startsWith("#")) {
+        continue
+      }
+
+      const lineIndent = line.search(/\S|$/)
+
+      if (!inPackagesSection) {
+        if (/^packages\s*:\s*$/.test(trimmedLine)) {
+          inPackagesSection = true
+          packagesIndent = lineIndent
+        }
+
+        continue
+      }
+
+      if (lineIndent <= packagesIndent && !trimmedLine.startsWith("-")) {
+        inPackagesSection = false
+
+        if (/^packages\s*:\s*$/.test(trimmedLine)) {
+          inPackagesSection = true
+          packagesIndent = lineIndent
+        }
+
+        continue
+      }
+
+      if (!trimmedLine.startsWith("-")) {
+        continue
+      }
+
+      let pattern = trimmedLine.slice(1).trim()
+
+      if (pattern === "") {
+        continue
+      }
+
+      if (pattern.startsWith('"') || pattern.startsWith("'")) {
+        const quote = pattern[0]
+        const closingIndex = pattern.indexOf(quote, 1)
+
+        if (closingIndex > 0) {
+          pattern = pattern.slice(1, closingIndex)
+        } else {
+          pattern = pattern.slice(1)
+        }
+      } else {
+        pattern = pattern.split(/\s+#/)[0]?.trim() ?? ""
+      }
+
+      if (pattern !== "") {
+        patterns.push(pattern)
       }
     }
   }

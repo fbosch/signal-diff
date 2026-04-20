@@ -299,6 +299,76 @@ function createAbsoluteWorkspaceRootsFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createPnpmWorkspaceParsingFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-pnpm-parse-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "pnpm-parse-fixture",
+        private: true,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "pnpm-workspace.yaml",
+    [
+      "packages:",
+      '  - "packages/*" # quoted with comment',
+      "  - 'apps/*'",
+      "onlyBuiltDependencies:",
+      "  - esbuild",
+      "",
+    ].join("\n"),
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "apps/web/package.json",
+    `${JSON.stringify({ name: "web", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "apps/web/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 1\n")
+  writeFile(repoRoot, "apps/web/src/index.ts", "export const web = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -469,6 +539,30 @@ test("tsconfig discovery supports explicit absolute workspace roots", () => {
     assert.deepEqual(repoContext.pathAliases, {
       "@pkg-a/*": ["packages/a/src/*"],
     })
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("pnpm workspace parsing only reads packages entries", () => {
+  const { repoRoot, baseRef } = createPnpmWorkspaceParsingFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.workspacePackages, [
+      { packageRoot: "apps/web" },
+      { packageRoot: "packages/a" },
+    ])
+    assert.deepEqual(repoContext.workspaceRoots, [
+      ".",
+      "apps/web",
+      "packages/a",
+    ])
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
