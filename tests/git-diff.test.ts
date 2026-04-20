@@ -559,6 +559,198 @@ function createMissingReferenceFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createJsoncPackageExtendsFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-jsonc-extends-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "jsonc-extends-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [{ path: "./packages/app" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/package.json",
+    `${JSON.stringify({ name: "app", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "node_modules/@tsconfig/node20/package.json",
+    `${JSON.stringify(
+      {
+        name: "@tsconfig/node20",
+        version: "0.0.0",
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "node_modules/@tsconfig/node20/tsconfig.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@from-package/*": ["types/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/tsconfig.json",
+    [
+      "{",
+      "  // JSONC comment should parse",
+      '  "extends": "@tsconfig/node20/tsconfig.json",',
+      '  "compilerOptions": {',
+      '    "paths": {',
+      '      "@app/*": ["src/*"],',
+      "    },",
+      "  },",
+      "}",
+      "",
+    ].join("\n"),
+  )
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
+function createConflictingAliasFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-conflicting-alias-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "conflicting-alias-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [{ path: "./packages/a" }, { path: "./packages/b" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/b/package.json",
+    `${JSON.stringify({ name: "b", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@/*": ["src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/b/tsconfig.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@/*": ["lib/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 1\n")
+  writeFile(repoRoot, "packages/b/lib/index.ts", "export const b = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -667,6 +859,10 @@ test("tsconfig project references and path aliases are resolved", () => {
       {
         configPath: "packages/a/tsconfig.json",
         references: ["packages/b/tsconfig.json"],
+        baseUrl: "packages/a",
+        pathAliases: {
+          "@pkg-b/*": ["packages/b/src/*"],
+        },
       },
       {
         configPath: "packages/b/tsconfig.json",
@@ -677,9 +873,6 @@ test("tsconfig project references and path aliases are resolved", () => {
         references: ["packages/a/tsconfig.json", "packages/b/tsconfig.json"],
       },
     ])
-    assert.deepEqual(repoContext.pathAliases, {
-      "@pkg-b/*": ["packages/b/src/*"],
-    })
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
@@ -720,15 +913,16 @@ test("tsconfig discovery supports explicit absolute workspace roots", () => {
       {
         configPath: "packages/a/tsconfig.json",
         references: [],
+        baseUrl: "packages/a",
+        pathAliases: {
+          "@pkg-a/*": ["packages/a/src/*"],
+        },
       },
       {
         configPath: "tsconfig.json",
         references: [],
       },
     ])
-    assert.deepEqual(repoContext.pathAliases, {
-      "@pkg-a/*": ["packages/a/src/*"],
-    })
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
@@ -786,9 +980,86 @@ test("path aliases inherit from tsconfig extends chain", () => {
       headRef: "HEAD",
     })
 
-    assert.deepEqual(repoContext.pathAliases, {
-      "@core/*": ["packages/core/src/*"],
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/cli/tsconfig.json",
+        references: [],
+        baseUrl: ".",
+        pathAliases: {
+          "@core/*": ["packages/core/src/*"],
+        },
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/cli/tsconfig.json"],
+      },
+    ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("tsconfig parsing handles JSONC and package extends", () => {
+  const { repoRoot, baseRef } = createJsoncPackageExtendsFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
     })
+
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/app/tsconfig.json",
+        references: [],
+        baseUrl: "node_modules/@tsconfig/node20",
+        pathAliases: {
+          "@app/*": ["node_modules/@tsconfig/node20/src/*"],
+        },
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/app/tsconfig.json"],
+      },
+    ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("conflicting aliases stay scoped per tsconfig project", () => {
+  const { repoRoot, baseRef } = createConflictingAliasFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/a/tsconfig.json",
+        references: [],
+        baseUrl: "packages/a",
+        pathAliases: {
+          "@/*": ["packages/a/src/*"],
+        },
+      },
+      {
+        configPath: "packages/b/tsconfig.json",
+        references: [],
+        baseUrl: "packages/b",
+        pathAliases: {
+          "@/*": ["packages/b/lib/*"],
+        },
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/a/tsconfig.json", "packages/b/tsconfig.json"],
+      },
+    ])
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }

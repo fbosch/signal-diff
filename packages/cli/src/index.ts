@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
-
 import { createTypeScriptStubExtractionResult } from "@signal-diff/adapter-typescript"
 import {
   type ChangedFile,
@@ -19,6 +18,7 @@ import {
 } from "@signal-diff/core"
 import { stubHeuristic } from "@signal-diff/heuristics"
 import { jsonReportRenderer } from "@signal-diff/reporting"
+import ts from "typescript"
 
 export interface GitRepoContextInput {
   repoRoot: string
@@ -205,133 +205,106 @@ function readJsonFile(filePath: string): unknown {
   return JSON.parse(readFileSync(filePath, "utf8"))
 }
 
-function resolveTsconfigExtendsPath(
-  fromTsconfigPath: string,
-  extendsPath: string,
-): string | null {
-  if (extendsPath.startsWith(".")) {
-    const relativePath = path.resolve(
-      path.dirname(fromTsconfigPath),
-      extendsPath,
-    )
-
-    if (relativePath.endsWith(".json")) {
-      return relativePath
-    }
-
-    return `${relativePath}.json`
-  }
-
-  if (path.isAbsolute(extendsPath)) {
-    if (extendsPath.endsWith(".json")) {
-      return extendsPath
-    }
-
-    return `${extendsPath}.json`
-  }
-
-  return null
+interface ParsedTsconfigProject {
+  references: string[]
+  referenceConfigPaths: string[]
+  baseUrl?: string
+  pathAliases?: Record<string, string[]>
 }
 
-function loadTsconfigWithExtends(tsconfigPath: string): {
-  config: {
-    references?: unknown
-    compilerOptions?: {
-      baseUrl?: unknown
-      paths?: unknown
-    }
-  }
-  chain: Array<{
-    configPath: string
-    config: {
-      references?: unknown
-      compilerOptions?: {
-        baseUrl?: unknown
-        paths?: unknown
-      }
-      extends?: unknown
-    }
-  }>
-} | null {
-  const visitedPaths = new Set<string>()
-  const chain: Array<{
-    configPath: string
-    config: {
-      references?: unknown
-      compilerOptions?: {
-        baseUrl?: unknown
-        paths?: unknown
-      }
-      extends?: unknown
-    }
-  }> = []
-
-  function visit(currentPath: string): boolean {
-    const normalizedPath = path.resolve(currentPath)
-
-    if (visitedPaths.has(normalizedPath)) {
-      return true
-    }
-
-    visitedPaths.add(normalizedPath)
-
-    let parsedConfig: unknown
-    try {
-      parsedConfig = readJsonFile(normalizedPath)
-    } catch {
-      return false
-    }
-
-    if (typeof parsedConfig !== "object" || parsedConfig === null) {
-      return false
-    }
-
-    const config = parsedConfig as {
-      references?: unknown
-      compilerOptions?: {
-        baseUrl?: unknown
-        paths?: unknown
-      }
-      extends?: unknown
-    }
-
-    const extendsField = config.extends
-
-    if (typeof extendsField === "string") {
-      const resolvedExtendsPath = resolveTsconfigExtendsPath(
-        normalizedPath,
-        extendsField,
-      )
-
-      if (resolvedExtendsPath !== null && existsSync(resolvedExtendsPath)) {
-        const parentLoaded = visit(resolvedExtendsPath)
-
-        if (!parentLoaded) {
-          return false
-        }
-      }
-    }
-
-    chain.push({ configPath: normalizedPath, config })
-
-    return true
+function parseTsconfigProject(
+  repoRoot: string,
+  tsconfigPath: string,
+): ParsedTsconfigProject | null {
+  const parseHost: ts.ParseConfigFileHost = {
+    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
+    fileExists: ts.sys.fileExists,
+    getCurrentDirectory: ts.sys.getCurrentDirectory,
+    readDirectory: ts.sys.readDirectory,
+    readFile: ts.sys.readFile,
+    trace: () => {},
+    onUnRecoverableConfigFileDiagnostic: () => {},
   }
 
-  const loaded = visit(tsconfigPath)
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    tsconfigPath,
+    {},
+    parseHost,
+  )
 
-  if (!loaded || chain.length === 0) {
+  if (parsed === undefined) {
     return null
   }
 
-  const currentChainEntry = chain[chain.length - 1]
+  const referenceConfigPaths: string[] = []
 
-  if (currentChainEntry === undefined) {
-    return null
+  for (const reference of parsed.projectReferences ?? []) {
+    const resolvedReferencePath = ts.resolveProjectReferencePath(reference)
+
+    if (!existsSync(resolvedReferencePath)) {
+      continue
+    }
+
+    referenceConfigPaths.push(path.resolve(resolvedReferencePath))
   }
+
+  const references = [...new Set(referenceConfigPaths)]
+    .map((referencePath) => toRepoRelativePath(repoRoot, referencePath))
+    .sort((left, right) => left.localeCompare(right))
+
+  const optionsBaseUrl =
+    typeof parsed.options.baseUrl === "string"
+      ? parsed.options.baseUrl
+      : undefined
+  const optionsPathsBasePath =
+    typeof parsed.options.pathsBasePath === "string"
+      ? parsed.options.pathsBasePath
+      : undefined
+  const aliasBasePath =
+    optionsBaseUrl ??
+    optionsPathsBasePath ??
+    path.dirname(path.resolve(tsconfigPath))
+
+  const rawPaths =
+    parsed.options.paths === undefined
+      ? undefined
+      : (parsed.options.paths as Record<string, string[]>)
+  let pathAliases: Record<string, string[]> | undefined
+
+  if (rawPaths !== undefined) {
+    const normalizedAliases: Record<string, string[]> = {}
+
+    for (const [alias, targets] of Object.entries(rawPaths)) {
+      const normalizedTargets = [...new Set(targets)]
+        .map((target) => {
+          const absoluteTarget = path.isAbsolute(target)
+            ? target
+            : path.resolve(aliasBasePath, target)
+
+          return toRepoRelativePath(repoRoot, absoluteTarget)
+        })
+        .sort((left, right) => left.localeCompare(right))
+
+      normalizedAliases[alias] = normalizedTargets
+    }
+
+    if (Object.keys(normalizedAliases).length > 0) {
+      pathAliases = normalizedAliases
+    }
+  }
+
+  const normalizedBaseUrl =
+    optionsBaseUrl === undefined
+      ? undefined
+      : toRepoRelativePath(repoRoot, optionsBaseUrl) || "."
 
   return {
-    config: currentChainEntry.config,
-    chain,
+    references,
+    referenceConfigPaths: [...new Set(referenceConfigPaths)].sort(
+      (left, right) => left.localeCompare(right),
+    ),
+    baseUrl: normalizedBaseUrl,
+    pathAliases,
   }
 }
 
@@ -567,34 +540,14 @@ function discoverWorkspacePackages(repoRoot: string): WorkspacePackage[] {
     .map((packageRoot) => ({ packageRoot }))
 }
 
-function resolveTsconfigReference(
-  fromTsconfigPath: string,
-  referencePath: string,
-): string {
-  const referenceAbsolutePath = path.resolve(
-    path.dirname(fromTsconfigPath),
-    referencePath,
-  )
-
-  if (referenceAbsolutePath.endsWith(".json")) {
-    return referenceAbsolutePath
-  }
-
-  return path.join(referenceAbsolutePath, "tsconfig.json")
-}
-
 function discoverTsconfigProjects(
   repoRoot: string,
   workspaceRoots: string[],
-): {
-  projects: TsconfigProject[]
-  pathAliases: Record<string, string[]>
-} {
+): TsconfigProject[] {
   const queuedPaths = new Set<string>()
   const visitedPaths = new Set<string>()
   const queue: string[] = []
   const projects: TsconfigProject[] = []
-  const pathAliases = new Map<string, Set<string>>()
 
   function queueTsconfig(tsconfigPath: string): void {
     const resolvedPath = path.resolve(tsconfigPath)
@@ -628,109 +581,35 @@ function discoverTsconfigProjects(
 
     visitedPaths.add(currentPath)
 
-    const loadedTsconfig = loadTsconfigWithExtends(currentPath)
+    const loadedTsconfig = parseTsconfigProject(repoRoot, currentPath)
 
     if (loadedTsconfig === null) {
       continue
     }
 
-    const { config, chain } = loadedTsconfig
-
-    const references: string[] = []
-
-    if (Array.isArray(config.references)) {
-      for (const reference of config.references) {
-        if (typeof reference !== "object" || reference === null) {
-          continue
-        }
-
-        const referencePath = (reference as { path?: unknown }).path
-
-        if (typeof referencePath !== "string") {
-          continue
-        }
-
-        const resolvedReference = resolveTsconfigReference(
-          currentPath,
-          referencePath,
-        )
-
-        if (existsSync(resolvedReference)) {
-          const referenceRelativePath = toRepoRelativePath(
-            repoRoot,
-            resolvedReference,
-          )
-
-          references.push(referenceRelativePath)
-          queueTsconfig(resolvedReference)
-        }
-      }
+    for (const referenceConfigPath of loadedTsconfig.referenceConfigPaths) {
+      queueTsconfig(referenceConfigPath)
     }
 
-    let activeBaseUrlPath = path.dirname(currentPath)
-
-    for (const chainEntry of chain) {
-      const compilerOptions = chainEntry.config.compilerOptions
-
-      if (typeof compilerOptions?.baseUrl === "string") {
-        activeBaseUrlPath = path.resolve(
-          path.dirname(chainEntry.configPath),
-          compilerOptions.baseUrl,
-        )
-      }
-
-      if (
-        compilerOptions !== undefined &&
-        typeof compilerOptions.paths === "object" &&
-        compilerOptions.paths !== null
-      ) {
-        for (const [alias, rawTargets] of Object.entries(
-          compilerOptions.paths as Record<string, unknown>,
-        )) {
-          if (!Array.isArray(rawTargets)) {
-            continue
-          }
-
-          const existingTargets = pathAliases.get(alias) ?? new Set<string>()
-
-          for (const rawTarget of rawTargets) {
-            if (typeof rawTarget !== "string") {
-              continue
-            }
-
-            const absoluteTarget = path.resolve(activeBaseUrlPath, rawTarget)
-            const relativeTarget = toRepoRelativePath(repoRoot, absoluteTarget)
-
-            existingTargets.add(relativeTarget)
-          }
-
-          pathAliases.set(alias, existingTargets)
-        }
-      }
-    }
-
-    projects.push({
+    const project: TsconfigProject = {
       configPath: toRepoRelativePath(repoRoot, currentPath),
-      references: [...new Set(references)].sort((left, right) =>
-        left.localeCompare(right),
-      ),
-    })
+      references: loadedTsconfig.references,
+    }
+
+    if (loadedTsconfig.baseUrl !== undefined) {
+      project.baseUrl = loadedTsconfig.baseUrl
+    }
+
+    if (loadedTsconfig.pathAliases !== undefined) {
+      project.pathAliases = loadedTsconfig.pathAliases
+    }
+
+    projects.push(project)
   }
 
-  const normalizedPathAliases: Record<string, string[]> = {}
-
-  for (const [alias, targets] of pathAliases) {
-    normalizedPathAliases[alias] = [...targets].sort((left, right) =>
-      left.localeCompare(right),
-    )
-  }
-
-  return {
-    projects: projects.sort((left, right) =>
-      left.configPath.localeCompare(right.configPath),
-    ),
-    pathAliases: normalizedPathAliases,
-  }
+  return projects.sort((left, right) =>
+    left.configPath.localeCompare(right.configPath),
+  )
 }
 
 export function loadRepoContextFromGit(input: GitRepoContextInput) {
@@ -750,7 +629,7 @@ export function loadRepoContextFromGit(input: GitRepoContextInput) {
     input.repoRoot,
     rawWorkspaceRoots,
   )
-  const { projects: tsconfigProjects, pathAliases } = discoverTsconfigProjects(
+  const tsconfigProjects = discoverTsconfigProjects(
     input.repoRoot,
     workspaceRoots,
   )
@@ -770,7 +649,6 @@ export function loadRepoContextFromGit(input: GitRepoContextInput) {
     ),
     workspacePackages,
     tsconfigProjects,
-    pathAliases,
   }
 }
 

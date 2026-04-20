@@ -278,6 +278,8 @@ export interface WorkspacePackage {
 export interface TsconfigProject {
   configPath: string
   references: string[]
+  baseUrl?: string
+  pathAliases?: Record<string, string[]>
 }
 
 export interface RepoContext {
@@ -291,7 +293,6 @@ export interface RepoContext {
   diffReferences?: DiffHunkReference[]
   workspacePackages?: WorkspacePackage[]
   tsconfigProjects?: TsconfigProject[]
-  pathAliases?: Record<string, string[]>
 }
 
 export interface ReviewRequest {
