@@ -658,6 +658,105 @@ function createJsoncPackageExtendsFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createArrayExtendsFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-array-extends-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "array-extends-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.paths-a.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@from-a/*": ["packages/a/src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.paths-b.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@from-b/*": ["packages/b/src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [{ path: "./packages/app" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/package.json",
+    `${JSON.stringify({ name: "app", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/app/tsconfig.json",
+    `${JSON.stringify(
+      {
+        extends: ["../../tsconfig.paths-a.json", "../../tsconfig.paths-b.json"],
+        compilerOptions: {},
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/app/src/index.ts", "export const app = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 function createConflictingAliasFixtureRepo(): {
   repoRoot: string
   baseRef: string
@@ -1016,6 +1115,35 @@ test("tsconfig parsing handles JSONC and package extends", () => {
         baseUrl: "node_modules/@tsconfig/node20",
         pathAliases: {
           "@app/*": ["node_modules/@tsconfig/node20/src/*"],
+        },
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/app/tsconfig.json"],
+      },
+    ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("tsconfig parsing supports array extends resolution", () => {
+  const { repoRoot, baseRef } = createArrayExtendsFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/app/tsconfig.json",
+        references: [],
+        baseUrl: ".",
+        pathAliases: {
+          "@from-b/*": ["packages/b/src/*"],
         },
       },
       {
