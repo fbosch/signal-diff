@@ -312,7 +312,12 @@ function discoverWorkspacePatterns(repoRoot: string): string[] {
     return patterns
   }
 
-  const packageJson = readJsonFile(packageJsonFilePath)
+  let packageJson: unknown
+  try {
+    packageJson = readJsonFile(packageJsonFilePath)
+  } catch {
+    return patterns
+  }
 
   if (typeof packageJson !== "object" || packageJson === null) {
     return patterns

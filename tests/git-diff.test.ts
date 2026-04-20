@@ -369,6 +369,52 @@ function createPnpmWorkspaceParsingFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createInvalidPackageJsonWorkspaceFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(
+    path.join(os.tmpdir(), "signal-diff-invalid-pkg-"),
+  )
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(repoRoot, "package.json", "{ invalid json\n")
+  writeFile(
+    repoRoot,
+    "pnpm-workspace.yaml",
+    ["packages:", "  - packages/*", ""].join("\n"),
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify({ files: [] }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -562,6 +608,24 @@ test("pnpm workspace parsing only reads packages entries", () => {
       ".",
       "apps/web",
       "packages/a",
+    ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("workspace discovery tolerates invalid package.json", () => {
+  const { repoRoot, baseRef } = createInvalidPackageJsonWorkspaceFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.workspacePackages, [
+      { packageRoot: "packages/a" },
     ])
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
