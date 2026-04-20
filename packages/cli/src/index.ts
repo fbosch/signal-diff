@@ -267,10 +267,6 @@ function discoverWorkspacePatterns(repoRoot: string): string[] {
 function expandWorkspacePattern(repoRoot: string, pattern: string): string[] {
   const normalizedPattern = normalizePath(pattern)
 
-  if (normalizedPattern.includes("**")) {
-    return []
-  }
-
   const segments = normalizedPattern
     .split("/")
     .map((segment) => segment.trim())
@@ -290,6 +286,26 @@ function expandWorkspacePattern(repoRoot: string, pattern: string): string[] {
     }
 
     const segment = segments[segmentIndex]
+
+    if (segment === "**") {
+      visit(currentDirectory, segmentIndex + 1)
+
+      if (!existsSync(currentDirectory)) {
+        return
+      }
+
+      for (const entry of readdirSync(currentDirectory, {
+        withFileTypes: true,
+      })) {
+        if (!entry.isDirectory()) {
+          continue
+        }
+
+        visit(path.join(currentDirectory, entry.name), segmentIndex)
+      }
+
+      return
+    }
 
     if (segment === "*") {
       if (!existsSync(currentDirectory)) {

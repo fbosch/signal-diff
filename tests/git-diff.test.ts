@@ -175,6 +175,69 @@ function createMonorepoFixtureRepo(): { repoRoot: string; baseRef: string } {
   return { repoRoot, baseRef }
 }
 
+function createRecursiveWorkspaceFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(path.join(os.tmpdir(), "signal-diff-recursive-"))
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "recursive-fixture",
+        private: true,
+        workspaces: ["packages/**"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify({ files: [] }, null, 2)}\n`,
+  )
+
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/nested/b/package.json",
+    `${JSON.stringify({ name: "b", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/nested/b/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 1\n")
+  writeFile(repoRoot, "packages/nested/b/src/index.ts", "export const b = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/a/src/index.ts", "export const a = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -296,6 +359,25 @@ test("tsconfig project references and path aliases are resolved", () => {
     assert.deepEqual(repoContext.pathAliases, {
       "@pkg-b/*": ["packages/b/src/*"],
     })
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("workspace discovery supports recursive ** workspace patterns", () => {
+  const { repoRoot, baseRef } = createRecursiveWorkspaceFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.workspacePackages, [
+      { packageRoot: "packages/a" },
+      { packageRoot: "packages/nested/b" },
+    ])
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
