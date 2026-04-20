@@ -13,7 +13,8 @@
     "lint": "biome check .",
     "pretest": "pnpm build",
     "test": "tsx --test tests/*.test.ts",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "verify": "pnpm lint && pnpm test && pnpm typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.6",
