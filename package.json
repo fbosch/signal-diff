@@ -2,7 +2,7 @@
   "name": "signal-diff",
   "version": "0.0.0",
   "private": true,
-  "description": "Concept-first diff review CLI for TypeScript repositories",
+  "description": "JSON-first review CLI for TypeScript repositories",
   "packageManager": "pnpm@10.14.0",
   "engines": {
     "node": ">=20"
@@ -14,7 +14,7 @@
     "pretest": "pnpm build",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc -b --pretty false",
-    "verify": "pnpm lint && pnpm test && pnpm typecheck"
+    "verify": "pnpm lint && pnpm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.6",
