@@ -85,6 +85,96 @@ function createDiffFixtureRepo(): { repoRoot: string; baseRef: string } {
   return { repoRoot, baseRef }
 }
 
+function createMonorepoFixtureRepo(): { repoRoot: string; baseRef: string } {
+  const repoRoot = mkdtempSync(path.join(os.tmpdir(), "signal-diff-monorepo-"))
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "monorepo-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [{ path: "./packages/a" }, { path: "./packages/b" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/package.json",
+    `${JSON.stringify({ name: "a", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/b/package.json",
+    `${JSON.stringify({ name: "b", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/tsconfig.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@pkg-b/*": ["../b/src/*"],
+          },
+        },
+        references: [{ path: "../b" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/b/tsconfig.json",
+    `${JSON.stringify({ compilerOptions: {} }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/a/src/index.ts",
+    ["export const value = 1", ""].join("\n"),
+  )
+  writeFile(
+    repoRoot,
+    "packages/b/src/index.ts",
+    ["export const peer = 1", ""].join("\n"),
+  )
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(
+    repoRoot,
+    "packages/a/src/index.ts",
+    ["export const value = 2", ""].join("\n"),
+  )
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -150,6 +240,62 @@ test("git-backed stub pipeline preserves diff-loaded repo context", () => {
       reviewSurface.diffReferences,
       request.repoContext.diffReferences,
     )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("workspace discovery does not require pnpm-workspace.yaml", () => {
+  const { repoRoot, baseRef } = createMonorepoFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.workspacePackages, [
+      { packageRoot: "packages/a" },
+      { packageRoot: "packages/b" },
+    ])
+    assert.deepEqual(repoContext.workspaceRoots, [
+      repoRoot,
+      "packages/a",
+      "packages/b",
+    ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("tsconfig project references and path aliases are resolved", () => {
+  const { repoRoot, baseRef } = createMonorepoFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.tsconfigProjects, [
+      {
+        configPath: "packages/a/tsconfig.json",
+        references: ["packages/b/tsconfig.json"],
+      },
+      {
+        configPath: "packages/b/tsconfig.json",
+        references: [],
+      },
+      {
+        configPath: "tsconfig.json",
+        references: ["packages/a/tsconfig.json", "packages/b/tsconfig.json"],
+      },
+    ])
+    assert.deepEqual(repoContext.pathAliases, {
+      "@pkg-b/*": ["packages/b/src/*"],
+    })
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }

@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
 
 import { createTypeScriptStubExtractionResult } from "@signal-diff/adapter-typescript"
 import {
@@ -12,6 +14,8 @@ import {
   type ReviewPipeline,
   type ReviewRequest,
   type ReviewSurface,
+  type TsconfigProject,
+  type WorkspacePackage,
 } from "@signal-diff/core"
 import { stubHeuristic } from "@signal-diff/heuristics"
 import { jsonReportRenderer } from "@signal-diff/reporting"
@@ -185,6 +189,315 @@ function loadDiffHunkReferencesFromGit(
   return parseDiffHunkReferences(output)
 }
 
+function normalizePath(value: string): string {
+  return value.split(path.sep).join("/")
+}
+
+function toRepoRelativePath(repoRoot: string, filePath: string): string {
+  const absolutePath = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(repoRoot, filePath)
+
+  return normalizePath(path.relative(repoRoot, absolutePath))
+}
+
+function readJsonFile(filePath: string): unknown {
+  return JSON.parse(readFileSync(filePath, "utf8"))
+}
+
+function discoverWorkspacePatterns(repoRoot: string): string[] {
+  const patterns: string[] = []
+  const pnpmWorkspaceFilePath = path.join(repoRoot, "pnpm-workspace.yaml")
+
+  if (existsSync(pnpmWorkspaceFilePath)) {
+    const workspaceFile = readFileSync(pnpmWorkspaceFilePath, "utf8")
+
+    for (const line of workspaceFile.split("\n")) {
+      const match = /^\s*-\s*(.+)\s*$/.exec(line)
+
+      if (match) {
+        patterns.push(match[1])
+      }
+    }
+  }
+
+  const packageJsonFilePath = path.join(repoRoot, "package.json")
+
+  if (!existsSync(packageJsonFilePath)) {
+    return patterns
+  }
+
+  const packageJson = readJsonFile(packageJsonFilePath)
+
+  if (typeof packageJson !== "object" || packageJson === null) {
+    return patterns
+  }
+
+  const workspaces = (packageJson as { workspaces?: unknown }).workspaces
+
+  if (Array.isArray(workspaces)) {
+    for (const entry of workspaces) {
+      if (typeof entry === "string") {
+        patterns.push(entry)
+      }
+    }
+
+    return patterns
+  }
+
+  if (typeof workspaces !== "object" || workspaces === null) {
+    return patterns
+  }
+
+  const workspacePackages = (workspaces as { packages?: unknown }).packages
+
+  if (!Array.isArray(workspacePackages)) {
+    return patterns
+  }
+
+  for (const entry of workspacePackages) {
+    if (typeof entry === "string") {
+      patterns.push(entry)
+    }
+  }
+
+  return patterns
+}
+
+function expandWorkspacePattern(repoRoot: string, pattern: string): string[] {
+  const normalizedPattern = normalizePath(pattern)
+
+  if (normalizedPattern.includes("**")) {
+    return []
+  }
+
+  const segments = normalizedPattern
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "" && segment !== ".")
+
+  const results: string[] = []
+
+  function visit(currentDirectory: string, segmentIndex: number): void {
+    if (segmentIndex >= segments.length) {
+      const packageJsonPath = path.join(currentDirectory, "package.json")
+
+      if (existsSync(packageJsonPath)) {
+        results.push(toRepoRelativePath(repoRoot, currentDirectory))
+      }
+
+      return
+    }
+
+    const segment = segments[segmentIndex]
+
+    if (segment === "*") {
+      if (!existsSync(currentDirectory)) {
+        return
+      }
+
+      for (const entry of readdirSync(currentDirectory, {
+        withFileTypes: true,
+      })) {
+        if (!entry.isDirectory()) {
+          continue
+        }
+
+        visit(path.join(currentDirectory, entry.name), segmentIndex + 1)
+      }
+
+      return
+    }
+
+    visit(path.join(currentDirectory, segment), segmentIndex + 1)
+  }
+
+  visit(repoRoot, 0)
+
+  return results
+}
+
+function discoverWorkspacePackages(repoRoot: string): WorkspacePackage[] {
+  const workspaceRoots = new Set<string>()
+
+  for (const pattern of discoverWorkspacePatterns(repoRoot)) {
+    for (const expandedPath of expandWorkspacePattern(repoRoot, pattern)) {
+      workspaceRoots.add(expandedPath)
+    }
+  }
+
+  return [...workspaceRoots]
+    .sort((left, right) => left.localeCompare(right))
+    .map((packageRoot) => ({ packageRoot }))
+}
+
+function resolveTsconfigReference(
+  fromTsconfigPath: string,
+  referencePath: string,
+): string {
+  const referenceAbsolutePath = path.resolve(
+    path.dirname(fromTsconfigPath),
+    referencePath,
+  )
+
+  if (referenceAbsolutePath.endsWith(".json")) {
+    return referenceAbsolutePath
+  }
+
+  return path.join(referenceAbsolutePath, "tsconfig.json")
+}
+
+function discoverTsconfigProjects(
+  repoRoot: string,
+  workspaceRoots: string[],
+): {
+  projects: TsconfigProject[]
+  pathAliases: Record<string, string[]>
+} {
+  const queuedPaths = new Set<string>()
+  const visitedPaths = new Set<string>()
+  const queue: string[] = []
+  const projects: TsconfigProject[] = []
+  const pathAliases = new Map<string, Set<string>>()
+
+  function queueTsconfig(tsconfigPath: string): void {
+    const resolvedPath = path.resolve(tsconfigPath)
+
+    if (queuedPaths.has(resolvedPath)) {
+      return
+    }
+
+    if (!existsSync(resolvedPath)) {
+      return
+    }
+
+    queuedPaths.add(resolvedPath)
+    queue.push(resolvedPath)
+  }
+
+  queueTsconfig(path.join(repoRoot, "tsconfig.json"))
+
+  for (const workspaceRoot of workspaceRoots) {
+    queueTsconfig(path.join(repoRoot, workspaceRoot, "tsconfig.json"))
+  }
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift()
+
+    if (currentPath === undefined || visitedPaths.has(currentPath)) {
+      continue
+    }
+
+    visitedPaths.add(currentPath)
+
+    let parsedConfig: unknown
+    try {
+      parsedConfig = readJsonFile(currentPath)
+    } catch {
+      continue
+    }
+
+    if (typeof parsedConfig !== "object" || parsedConfig === null) {
+      continue
+    }
+
+    const config = parsedConfig as {
+      references?: unknown
+      compilerOptions?: {
+        baseUrl?: unknown
+        paths?: unknown
+      }
+    }
+
+    const references: string[] = []
+
+    if (Array.isArray(config.references)) {
+      for (const reference of config.references) {
+        if (typeof reference !== "object" || reference === null) {
+          continue
+        }
+
+        const referencePath = (reference as { path?: unknown }).path
+
+        if (typeof referencePath !== "string") {
+          continue
+        }
+
+        const resolvedReference = resolveTsconfigReference(
+          currentPath,
+          referencePath,
+        )
+        const referenceRelativePath = toRepoRelativePath(
+          repoRoot,
+          resolvedReference,
+        )
+
+        references.push(referenceRelativePath)
+        queueTsconfig(resolvedReference)
+      }
+    }
+
+    const compilerOptions = config.compilerOptions
+    const baseUrl =
+      typeof compilerOptions?.baseUrl === "string"
+        ? compilerOptions.baseUrl
+        : "."
+
+    if (
+      compilerOptions !== undefined &&
+      typeof compilerOptions.paths === "object" &&
+      compilerOptions.paths !== null
+    ) {
+      for (const [alias, rawTargets] of Object.entries(
+        compilerOptions.paths as Record<string, unknown>,
+      )) {
+        if (!Array.isArray(rawTargets)) {
+          continue
+        }
+
+        for (const rawTarget of rawTargets) {
+          if (typeof rawTarget !== "string") {
+            continue
+          }
+
+          const absoluteTarget = path.resolve(
+            path.dirname(currentPath),
+            baseUrl,
+            rawTarget,
+          )
+          const relativeTarget = toRepoRelativePath(repoRoot, absoluteTarget)
+          const existingTargets = pathAliases.get(alias) ?? new Set<string>()
+
+          existingTargets.add(relativeTarget)
+          pathAliases.set(alias, existingTargets)
+        }
+      }
+    }
+
+    projects.push({
+      configPath: toRepoRelativePath(repoRoot, currentPath),
+      references: [...new Set(references)].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    })
+  }
+
+  const normalizedPathAliases: Record<string, string[]> = {}
+
+  for (const [alias, targets] of pathAliases) {
+    normalizedPathAliases[alias] = [...targets].sort((left, right) =>
+      left.localeCompare(right),
+    )
+  }
+
+  return {
+    projects: projects.sort((left, right) =>
+      left.configPath.localeCompare(right.configPath),
+    ),
+    pathAliases: normalizedPathAliases,
+  }
+}
+
 export function loadRepoContextFromGit(input: GitRepoContextInput) {
   const resolvedBaseRef = resolveGitCommit(input.repoRoot, input.baseRef)
   const resolvedHeadRef = resolveGitCommit(input.repoRoot, input.headRef)
@@ -193,10 +506,19 @@ export function loadRepoContextFromGit(input: GitRepoContextInput) {
     resolvedBaseRef,
     resolvedHeadRef,
   )
+  const workspacePackages = discoverWorkspacePackages(input.repoRoot)
+  const workspaceRoots = input.workspaceRoots ?? [
+    input.repoRoot,
+    ...workspacePackages.map((entry) => entry.packageRoot),
+  ]
+  const { projects: tsconfigProjects, pathAliases } = discoverTsconfigProjects(
+    input.repoRoot,
+    workspaceRoots,
+  )
 
   return {
     repoRoot: input.repoRoot,
-    workspaceRoots: input.workspaceRoots ?? [input.repoRoot],
+    workspaceRoots,
     baseRef: input.baseRef,
     headRef: input.headRef,
     resolvedBaseRef,
@@ -207,6 +529,9 @@ export function loadRepoContextFromGit(input: GitRepoContextInput) {
       resolvedBaseRef,
       resolvedHeadRef,
     ),
+    workspacePackages,
+    tsconfigProjects,
+    pathAliases,
   }
 }
 
