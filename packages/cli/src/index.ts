@@ -205,6 +205,136 @@ function readJsonFile(filePath: string): unknown {
   return JSON.parse(readFileSync(filePath, "utf8"))
 }
 
+function resolveTsconfigExtendsPath(
+  fromTsconfigPath: string,
+  extendsPath: string,
+): string | null {
+  if (extendsPath.startsWith(".")) {
+    const relativePath = path.resolve(
+      path.dirname(fromTsconfigPath),
+      extendsPath,
+    )
+
+    if (relativePath.endsWith(".json")) {
+      return relativePath
+    }
+
+    return `${relativePath}.json`
+  }
+
+  if (path.isAbsolute(extendsPath)) {
+    if (extendsPath.endsWith(".json")) {
+      return extendsPath
+    }
+
+    return `${extendsPath}.json`
+  }
+
+  return null
+}
+
+function loadTsconfigWithExtends(tsconfigPath: string): {
+  config: {
+    references?: unknown
+    compilerOptions?: {
+      baseUrl?: unknown
+      paths?: unknown
+    }
+  }
+  chain: Array<{
+    configPath: string
+    config: {
+      references?: unknown
+      compilerOptions?: {
+        baseUrl?: unknown
+        paths?: unknown
+      }
+      extends?: unknown
+    }
+  }>
+} | null {
+  const visitedPaths = new Set<string>()
+  const chain: Array<{
+    configPath: string
+    config: {
+      references?: unknown
+      compilerOptions?: {
+        baseUrl?: unknown
+        paths?: unknown
+      }
+      extends?: unknown
+    }
+  }> = []
+
+  function visit(currentPath: string): boolean {
+    const normalizedPath = path.resolve(currentPath)
+
+    if (visitedPaths.has(normalizedPath)) {
+      return true
+    }
+
+    visitedPaths.add(normalizedPath)
+
+    let parsedConfig: unknown
+    try {
+      parsedConfig = readJsonFile(normalizedPath)
+    } catch {
+      return false
+    }
+
+    if (typeof parsedConfig !== "object" || parsedConfig === null) {
+      return false
+    }
+
+    const config = parsedConfig as {
+      references?: unknown
+      compilerOptions?: {
+        baseUrl?: unknown
+        paths?: unknown
+      }
+      extends?: unknown
+    }
+
+    const extendsField = config.extends
+
+    if (typeof extendsField === "string") {
+      const resolvedExtendsPath = resolveTsconfigExtendsPath(
+        normalizedPath,
+        extendsField,
+      )
+
+      if (resolvedExtendsPath !== null && existsSync(resolvedExtendsPath)) {
+        const parentLoaded = visit(resolvedExtendsPath)
+
+        if (!parentLoaded) {
+          return false
+        }
+      }
+    }
+
+    chain.push({ configPath: normalizedPath, config })
+
+    return true
+  }
+
+  const loaded = visit(tsconfigPath)
+
+  if (!loaded || chain.length === 0) {
+    return null
+  }
+
+  const currentChainEntry = chain[chain.length - 1]
+
+  if (currentChainEntry === undefined) {
+    return null
+  }
+
+  return {
+    config: currentChainEntry.config,
+    chain,
+  }
+}
+
 function normalizeWorkspaceRoot(
   repoRoot: string,
   workspaceRoot: string,
@@ -498,24 +628,13 @@ function discoverTsconfigProjects(
 
     visitedPaths.add(currentPath)
 
-    let parsedConfig: unknown
-    try {
-      parsedConfig = readJsonFile(currentPath)
-    } catch {
+    const loadedTsconfig = loadTsconfigWithExtends(currentPath)
+
+    if (loadedTsconfig === null) {
       continue
     }
 
-    if (typeof parsedConfig !== "object" || parsedConfig === null) {
-      continue
-    }
-
-    const config = parsedConfig as {
-      references?: unknown
-      compilerOptions?: {
-        baseUrl?: unknown
-        paths?: unknown
-      }
-    }
+    const { config, chain } = loadedTsconfig
 
     const references: string[] = []
 
@@ -545,38 +664,43 @@ function discoverTsconfigProjects(
       }
     }
 
-    const compilerOptions = config.compilerOptions
-    const baseUrl =
-      typeof compilerOptions?.baseUrl === "string"
-        ? compilerOptions.baseUrl
-        : "."
+    let activeBaseUrlPath = path.dirname(currentPath)
 
-    if (
-      compilerOptions !== undefined &&
-      typeof compilerOptions.paths === "object" &&
-      compilerOptions.paths !== null
-    ) {
-      for (const [alias, rawTargets] of Object.entries(
-        compilerOptions.paths as Record<string, unknown>,
-      )) {
-        if (!Array.isArray(rawTargets)) {
-          continue
-        }
+    for (const chainEntry of chain) {
+      const compilerOptions = chainEntry.config.compilerOptions
 
-        for (const rawTarget of rawTargets) {
-          if (typeof rawTarget !== "string") {
+      if (typeof compilerOptions?.baseUrl === "string") {
+        activeBaseUrlPath = path.resolve(
+          path.dirname(chainEntry.configPath),
+          compilerOptions.baseUrl,
+        )
+      }
+
+      if (
+        compilerOptions !== undefined &&
+        typeof compilerOptions.paths === "object" &&
+        compilerOptions.paths !== null
+      ) {
+        for (const [alias, rawTargets] of Object.entries(
+          compilerOptions.paths as Record<string, unknown>,
+        )) {
+          if (!Array.isArray(rawTargets)) {
             continue
           }
 
-          const absoluteTarget = path.resolve(
-            path.dirname(currentPath),
-            baseUrl,
-            rawTarget,
-          )
-          const relativeTarget = toRepoRelativePath(repoRoot, absoluteTarget)
           const existingTargets = pathAliases.get(alias) ?? new Set<string>()
 
-          existingTargets.add(relativeTarget)
+          for (const rawTarget of rawTargets) {
+            if (typeof rawTarget !== "string") {
+              continue
+            }
+
+            const absoluteTarget = path.resolve(activeBaseUrlPath, rawTarget)
+            const relativeTarget = toRepoRelativePath(repoRoot, absoluteTarget)
+
+            existingTargets.add(relativeTarget)
+          }
+
           pathAliases.set(alias, existingTargets)
         }
       }

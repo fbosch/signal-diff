@@ -415,6 +415,87 @@ function createInvalidPackageJsonWorkspaceFixtureRepo(): {
   return { repoRoot, baseRef }
 }
 
+function createExtendsAliasFixtureRepo(): {
+  repoRoot: string
+  baseRef: string
+} {
+  const repoRoot = mkdtempSync(path.join(os.tmpdir(), "signal-diff-extends-"))
+
+  runGit(repoRoot, ["init", "-b", "master"])
+  runGit(repoRoot, ["config", "user.name", "OpenCode"])
+  runGit(repoRoot, ["config", "user.email", "opencode@example.com"])
+
+  writeFile(
+    repoRoot,
+    "package.json",
+    `${JSON.stringify(
+      {
+        name: "extends-alias-fixture",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.base.json",
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@core/*": ["packages/core/src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "tsconfig.json",
+    `${JSON.stringify(
+      {
+        files: [],
+        references: [{ path: "./packages/cli" }],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/cli/package.json",
+    `${JSON.stringify({ name: "cli", version: "0.0.0" }, null, 2)}\n`,
+  )
+  writeFile(
+    repoRoot,
+    "packages/cli/tsconfig.json",
+    `${JSON.stringify(
+      {
+        extends: "../../tsconfig.base.json",
+        compilerOptions: {},
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  writeFile(repoRoot, "packages/cli/src/index.ts", "export const cli = 1\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "base"])
+
+  const baseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+  writeFile(repoRoot, "packages/cli/src/index.ts", "export const cli = 2\n")
+  runGit(repoRoot, ["add", "."])
+  runGit(repoRoot, ["commit", "-m", "head"])
+
+  return { repoRoot, baseRef }
+}
+
 test("git diff ingestion resolves refs, changed files, and hunks", () => {
   const { repoRoot, baseRef } = createDiffFixtureRepo()
 
@@ -627,6 +708,24 @@ test("workspace discovery tolerates invalid package.json", () => {
     assert.deepEqual(repoContext.workspacePackages, [
       { packageRoot: "packages/a" },
     ])
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("path aliases inherit from tsconfig extends chain", () => {
+  const { repoRoot, baseRef } = createExtendsAliasFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    assert.deepEqual(repoContext.pathAliases, {
+      "@core/*": ["packages/core/src/*"],
+    })
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
