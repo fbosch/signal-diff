@@ -1,11 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { performance } from "node:perf_hooks"
 
-import {
-  loadBaselineResult,
-  resolveBaselinePath,
-  writeBaselineResult,
-} from "./baseline.ts"
+import { resolveBaselinePath, writeBaselineResult } from "./baseline.ts"
 import {
   BENCHMARK_RESULT_SCHEMA_VERSION,
   type BenchmarkResultsV1,
@@ -135,12 +131,24 @@ function percentile(samples: number[], fraction: number): number {
     return 0
   }
 
-  const index = Math.min(
-    samples.length - 1,
-    Math.max(0, Math.floor((samples.length - 1) * fraction)),
-  )
+  if (samples.length === 1) {
+    return samples[0] ?? 0
+  }
 
-  return samples[index] ?? 0
+  const boundedFraction = Math.min(1, Math.max(0, fraction))
+  const position = (samples.length - 1) * boundedFraction
+  const lowerIndex = Math.floor(position)
+  const upperIndex = Math.ceil(position)
+  const lowerValue = samples[lowerIndex] ?? 0
+  const upperValue = samples[upperIndex] ?? lowerValue
+
+  if (lowerIndex === upperIndex) {
+    return lowerValue
+  }
+
+  const weight = position - lowerIndex
+
+  return lowerValue + (upperValue - lowerValue) * weight
 }
 
 function summarizeScenario(
@@ -239,9 +247,7 @@ function toBenchmarkResults(
   controls: BenchmarkControls,
   summaries: ScenarioSummary[],
 ): BenchmarkResultsV1 {
-  const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
-    encoding: "utf8",
-  }).trim()
+  const gitCommit = resolveGitCommit()
 
   return {
     schema_version: BENCHMARK_RESULT_SCHEMA_VERSION,
@@ -265,9 +271,20 @@ function toBenchmarkResults(
   }
 }
 
+function resolveGitCommit(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    }).trim()
+  } catch {
+    return "unknown"
+  }
+}
+
 function main(): void {
   const controls = parseControls(process.argv.slice(2))
-  loadBaselineResult(controls.baselinePath)
+
   const knownScenarioIds = new Set(
     benchmarkScenarios.map((scenario) => scenario.id),
   )
