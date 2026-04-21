@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "description": "Primary workflow and validation constraints for this repo."
+    },
+    {
+      "path": "README.md",
+      "description": "Monorepo package boundaries and tooling baseline."
+    },
+    {
+      "path": "openspec/config.yaml",
+      "description": "Spec-driven workflow context and architecture constraints."
+    },
+    {
+      "path": "docs/SPEC.md",
+      "description": "Product-level intent and architecture principles referenced by OpenSpec."
+    }
+  ]
+}
