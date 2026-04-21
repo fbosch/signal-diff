@@ -8,9 +8,13 @@
     "node": ">=20"
   },
   "scripts": {
+    "bench": "tsx benchmarks/run.ts",
+    "bench:ci": "tsx benchmarks/run.ts --warmup=1 --samples=8 --iterations=25 --json",
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "lint": "biome check .",
+    "prebench": "pnpm build",
+    "prebench:ci": "pnpm build",
     "pretest": "pnpm build",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc -b --pretty false",

@@ -1,0 +1,7 @@
+{
+  "name": "benchmark-ts-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
