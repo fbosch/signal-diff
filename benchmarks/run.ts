@@ -1,5 +1,17 @@
+import { execFileSync } from "node:child_process"
 import { performance } from "node:perf_hooks"
 
+import {
+  loadBaselineResult,
+  resolveBaselinePath,
+  writeBaselineResult,
+} from "./baseline.ts"
+import {
+  BENCHMARK_RESULT_SCHEMA_VERSION,
+  type BenchmarkResultsV1,
+  type BenchmarkRunControls,
+  createBenchmarkRuntimeMetadata,
+} from "./contracts.ts"
 import { benchmarkScenarios } from "./scenarios.ts"
 
 interface BenchmarkControls {
@@ -8,6 +20,8 @@ interface BenchmarkControls {
   iterations: number
   json: boolean
   scenarioIds: Set<string>
+  baselinePath: string
+  updateBaseline: boolean
 }
 
 interface ScenarioSummary {
@@ -46,6 +60,8 @@ function parseControls(argv: string[]): BenchmarkControls {
   let iterations = DEFAULT_ITERATIONS
   let json = false
   const scenarioIds = new Set<string>()
+  let baselinePath = ""
+  let updateBaseline = false
 
   for (const argument of argv) {
     if (argument === "--json") {
@@ -90,6 +106,16 @@ function parseControls(argv: string[]): BenchmarkControls {
       continue
     }
 
+    if (argument.startsWith("--baseline=")) {
+      baselinePath = argument.slice("--baseline=".length)
+      continue
+    }
+
+    if (argument === "--update-baseline") {
+      updateBaseline = true
+      continue
+    }
+
     throw new Error(`Unknown argument '${argument}'.`)
   }
 
@@ -99,6 +125,8 @@ function parseControls(argv: string[]): BenchmarkControls {
     iterations,
     json,
     scenarioIds,
+    baselinePath: resolveBaselinePath(baselinePath),
+    updateBaseline,
   }
 }
 
@@ -109,7 +137,7 @@ function percentile(samples: number[], fraction: number): number {
 
   const index = Math.min(
     samples.length - 1,
-    Math.max(0, Math.ceil(samples.length * fraction) - 1),
+    Math.max(0, Math.floor((samples.length - 1) * fraction)),
   )
 
   return samples[index] ?? 0
@@ -197,8 +225,65 @@ function formatHumanOutput(summaries: ScenarioSummary[]): string {
   return lines.join("\n")
 }
 
+function toBenchmarkRunControls(
+  controls: BenchmarkControls,
+): BenchmarkRunControls {
+  return {
+    warmup: controls.warmup,
+    samples: controls.samples,
+    iterations: controls.iterations,
+  }
+}
+
+function toBenchmarkResults(
+  controls: BenchmarkControls,
+  summaries: ScenarioSummary[],
+): BenchmarkResultsV1 {
+  const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim()
+
+  return {
+    schema_version: BENCHMARK_RESULT_SCHEMA_VERSION,
+    generated_at: new Date().toISOString(),
+    git_commit: gitCommit,
+    runtime: createBenchmarkRuntimeMetadata(),
+    controls: toBenchmarkRunControls(controls),
+    scenarios: summaries.map((summary) => ({
+      id: summary.id,
+      description: summary.description,
+      warmup: summary.warmup,
+      samples: summary.samples,
+      iterations: summary.iterations,
+      checksum: summary.checksum,
+      min_ms: summary.minMs,
+      p50_ms: summary.p50Ms,
+      p95_ms: summary.p95Ms,
+      max_ms: summary.maxMs,
+      mean_ms: summary.meanMs,
+    })),
+  }
+}
+
 function main(): void {
   const controls = parseControls(process.argv.slice(2))
+  loadBaselineResult(controls.baselinePath)
+  const knownScenarioIds = new Set(
+    benchmarkScenarios.map((scenario) => scenario.id),
+  )
+
+  if (controls.scenarioIds.size > 0) {
+    const unknownScenarioIds = [...controls.scenarioIds].filter(
+      (scenarioId) => knownScenarioIds.has(scenarioId) === false,
+    )
+
+    if (unknownScenarioIds.length > 0) {
+      throw new Error(
+        `Unknown scenario id(s): ${unknownScenarioIds.join(", ")}. Available: ${[...knownScenarioIds].join(", ")}.`,
+      )
+    }
+  }
+
   const selectedScenarios = benchmarkScenarios.filter((scenario) => {
     if (controls.scenarioIds.size === 0) {
       return true
@@ -216,15 +301,21 @@ function main(): void {
   const summaries = selectedScenarios.map((scenario) =>
     runScenario(scenario.id, scenario.description, scenario.run, controls),
   )
+  const benchmarkResults = toBenchmarkResults(controls, summaries)
+
+  if (controls.updateBaseline) {
+    writeBaselineResult(controls.baselinePath, benchmarkResults)
+  }
 
   if (controls.json) {
-    process.stdout.write(
-      `${JSON.stringify({ scenarios: summaries }, null, 2)}\n`,
-    )
+    process.stdout.write(`${JSON.stringify(benchmarkResults, null, 2)}\n`)
     return
   }
 
-  process.stdout.write(`${formatHumanOutput(summaries)}\n`)
+  const baselineLine = controls.updateBaseline
+    ? `\n\nBaseline updated: ${controls.baselinePath}`
+    : ""
+  process.stdout.write(`${formatHumanOutput(summaries)}${baselineLine}\n`)
 }
 
 main()

@@ -6,9 +6,9 @@
 
 ## 2. Result Contract And Baselines
 
-- [ ] 2.1 Add versioned JSON schema for benchmark outputs.
-- [ ] 2.2 Add baseline storage/update workflow with auditability.
-- [ ] 2.3 Add schema compatibility validation for benchmark outputs.
+- [x] 2.1 Add versioned JSON schema for benchmark outputs.
+- [x] 2.2 Add baseline storage/update workflow with auditability.
+- [x] 2.3 Add schema compatibility validation for benchmark outputs.
 
 ## 3. CI Automation And Drift Policy
 

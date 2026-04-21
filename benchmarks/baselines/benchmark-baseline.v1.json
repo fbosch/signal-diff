@@ -1,0 +1,43 @@
+{
+  "schema_version": "v1alpha1",
+  "generated_at": "2026-04-21T21:34:45.366Z",
+  "git_commit": "1172001fbb8c3013d57cb64411f9768128b80501",
+  "runtime": {
+    "node_version": "v25.2.1",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "controls": {
+    "warmup": 2,
+    "samples": 12,
+    "iterations": 30
+  },
+  "scenarios": [
+    {
+      "id": "parse-diff-hunks",
+      "description": "Parse deterministic unified diff hunks",
+      "warmup": 2,
+      "samples": 12,
+      "iterations": 30,
+      "checksum": 33600,
+      "min_ms": 0.03966573333333751,
+      "p50_ms": 0.06576250000000528,
+      "p95_ms": 0.16010080000000168,
+      "max_ms": 0.2804684333333322,
+      "mean_ms": 0.08770968888889064
+    },
+    {
+      "id": "typescript-extraction",
+      "description": "Extract canonical entities from fixture monorepo",
+      "warmup": 2,
+      "samples": 12,
+      "iterations": 30,
+      "checksum": 3360,
+      "min_ms": 274.21305123333343,
+      "p50_ms": 283.79879300000005,
+      "p95_ms": 300.6116578,
+      "max_ms": 302.16145973333334,
+      "mean_ms": 287.5256709138889
+    }
+  ]
+}
