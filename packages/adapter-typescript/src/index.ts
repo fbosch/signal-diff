@@ -11,7 +11,7 @@ import type {
   ReviewRequest,
 } from "@signal-diff/core"
 import { createEmptyCanonicalFeatures } from "@signal-diff/core"
-import { Project, type SourceFile } from "ts-morph"
+import { Node, Project, type SourceFile, SyntaxKind } from "ts-morph"
 
 export interface TypeScriptAdapterInput {
   filePath: string
@@ -31,6 +31,18 @@ export interface TypeScriptProjectLoaderResult {
   projects: LoadedTypeScriptProject[]
   changedSourceFiles: SourceFile[]
   adjacentSourceFiles: SourceFile[]
+}
+
+interface CanonicalEntitySeed {
+  kind: CanonicalEntityKind
+  name: string
+  modulePath: string
+  exported: boolean
+  location: {
+    startLine: number
+    endLine: number
+  }
+  scopeName: string
 }
 
 function toAbsoluteRepoPath(repoRoot: string, filePath: string): string {
@@ -302,9 +314,322 @@ export function createTypeScriptStubExtractionResult(
   }
 }
 
+function isJsxLikeNode(node: Node | undefined): boolean {
+  if (node === undefined) {
+    return false
+  }
+
+  if (
+    node.isKind(SyntaxKind.JsxElement) ||
+    node.isKind(SyntaxKind.JsxFragment) ||
+    node.isKind(SyntaxKind.JsxSelfClosingElement)
+  ) {
+    return true
+  }
+
+  if (Node.isCallExpression(node)) {
+    return node.getExpression().getText() === "React.createElement"
+  }
+
+  return false
+}
+
+function hasJsxReturnBody(node: Node): boolean {
+  if (Node.isArrowFunction(node)) {
+    const body = node.getBody()
+
+    if (Node.isBlock(body) === false) {
+      return isJsxLikeNode(body)
+    }
+
+    return body
+      .getDescendantsOfKind(SyntaxKind.ReturnStatement)
+      .some((returnStatement) => isJsxLikeNode(returnStatement.getExpression()))
+  }
+
+  if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node)) {
+    const body = node.getBody()
+
+    if (body === undefined) {
+      return false
+    }
+
+    return body
+      .getDescendantsOfKind(SyntaxKind.ReturnStatement)
+      .some((returnStatement) => isJsxLikeNode(returnStatement.getExpression()))
+  }
+
+  return false
+}
+
+function getSeedLocation(node: Node): { startLine: number; endLine: number } {
+  return {
+    startLine: node.getStartLineNumber(),
+    endLine: node.getEndLineNumber(),
+  }
+}
+
+function getModuleEntitySeed(
+  modulePath: string,
+  sourceFile: SourceFile,
+): CanonicalEntitySeed {
+  return {
+    kind: "module",
+    name: modulePath,
+    modulePath,
+    exported: true,
+    location: {
+      startLine: 1,
+      endLine: sourceFile.getEndLineNumber(),
+    },
+    scopeName: "module",
+  }
+}
+
+function collectTopLevelEntitySeeds(
+  modulePath: string,
+  sourceFile: SourceFile,
+): CanonicalEntitySeed[] {
+  const seeds: CanonicalEntitySeed[] = [
+    getModuleEntitySeed(modulePath, sourceFile),
+  ]
+
+  for (const statement of sourceFile.getStatements()) {
+    if (Node.isFunctionDeclaration(statement)) {
+      const functionName = statement.getName()
+
+      if (functionName === undefined) {
+        continue
+      }
+
+      const kind = hasJsxReturnBody(statement) ? "render_unit" : "function"
+      seeds.push({
+        kind,
+        name: functionName,
+        modulePath,
+        exported: statement.isExported(),
+        location: getSeedLocation(statement),
+        scopeName: functionName,
+      })
+      continue
+    }
+
+    if (Node.isInterfaceDeclaration(statement)) {
+      const contractName = statement.getName()
+      seeds.push({
+        kind: "contract",
+        name: contractName,
+        modulePath,
+        exported: statement.isExported(),
+        location: getSeedLocation(statement),
+        scopeName: contractName,
+      })
+      continue
+    }
+
+    if (
+      Node.isClassDeclaration(statement) ||
+      Node.isTypeAliasDeclaration(statement) ||
+      Node.isEnumDeclaration(statement)
+    ) {
+      const typeName = statement.getName()
+
+      if (typeName !== undefined) {
+        seeds.push({
+          kind: "type_like_entity",
+          name: typeName,
+          modulePath,
+          exported: statement.isExported(),
+          location: getSeedLocation(statement),
+          scopeName: typeName,
+        })
+      }
+
+      if (Node.isClassDeclaration(statement)) {
+        for (const member of statement.getMembers()) {
+          if (Node.isMethodDeclaration(member)) {
+            const methodName = member.getName()
+            seeds.push({
+              kind: "method",
+              name: methodName,
+              modulePath,
+              exported: false,
+              location: getSeedLocation(member),
+              scopeName: `${typeName ?? "class"}.${methodName}`,
+            })
+            continue
+          }
+
+          if (Node.isPropertyDeclaration(member)) {
+            const fieldName = member.getName()
+            seeds.push({
+              kind: "field",
+              name: fieldName,
+              modulePath,
+              exported: false,
+              location: getSeedLocation(member),
+              scopeName: `${typeName ?? "class"}.${fieldName}`,
+            })
+          }
+        }
+      }
+
+      continue
+    }
+
+    if (Node.isVariableStatement(statement)) {
+      for (const declaration of statement.getDeclarations()) {
+        const initializer = declaration.getInitializer()
+
+        if (
+          Node.isArrowFunction(initializer) === false &&
+          Node.isFunctionExpression(initializer) === false
+        ) {
+          continue
+        }
+
+        if (hasJsxReturnBody(initializer) === false) {
+          continue
+        }
+
+        const renderName = declaration.getName()
+        seeds.push({
+          kind: "render_unit",
+          name: renderName,
+          modulePath,
+          exported: statement.isExported(),
+          location: getSeedLocation(declaration),
+          scopeName: renderName,
+        })
+      }
+    }
+  }
+
+  return seeds
+}
+
+function createCanonicalEntityFromSeed(
+  seed: CanonicalEntitySeed,
+  ordinal: number,
+): CanonicalEntity {
+  const features = createEmptyCanonicalFeatures(seed.modulePath)
+  const scopedId =
+    ordinal === 0 ? seed.scopeName : `${seed.scopeName}:${String(ordinal + 1)}`
+
+  return {
+    id: `ts:${seed.modulePath}#${seed.kind}:${scopedId}`,
+    kind: seed.kind,
+    name: seed.name,
+    modulePath: seed.modulePath,
+    exported: seed.exported,
+    location: {
+      filePath: seed.modulePath,
+      startLine: seed.location.startLine,
+      endLine: seed.location.endLine,
+    },
+    features,
+  }
+}
+
+function buildCanonicalEntitiesFromSeeds(
+  seeds: CanonicalEntitySeed[],
+): CanonicalEntity[] {
+  const ordinalByScope = new Map<string, number>()
+
+  return seeds
+    .sort((left, right) => {
+      if (left.modulePath !== right.modulePath) {
+        return left.modulePath.localeCompare(right.modulePath)
+      }
+
+      if (left.location.startLine !== right.location.startLine) {
+        return left.location.startLine - right.location.startLine
+      }
+
+      if (left.location.endLine !== right.location.endLine) {
+        return left.location.endLine - right.location.endLine
+      }
+
+      return left.scopeName.localeCompare(right.scopeName)
+    })
+    .map((seed) => {
+      const scopeKey = `${seed.modulePath}#${seed.kind}:${seed.scopeName}`
+      const nextOrdinal = ordinalByScope.get(scopeKey) ?? 0
+      ordinalByScope.set(scopeKey, nextOrdinal + 1)
+      return createCanonicalEntityFromSeed(seed, nextOrdinal)
+    })
+}
+
+function extractSourceEntities(
+  repoContext: RepoContext,
+  sourceFiles: SourceFile[],
+): CanonicalEntity[] {
+  const seeds = sourceFiles.flatMap((sourceFile) =>
+    collectTopLevelEntitySeeds(
+      toRepoRelativePath(repoContext.repoRoot, sourceFile.getFilePath()),
+      sourceFile,
+    ),
+  )
+
+  return buildCanonicalEntitiesFromSeeds(seeds)
+}
+
+export function createTypeScriptExtractionResult(
+  request: ReviewRequest,
+): ExtractionResult {
+  const sourceChanges = request.repoContext.changedFiles.filter(
+    (changedFile) => changedFile.kind === "source",
+  )
+
+  if (
+    sourceChanges.length === 0 ||
+    (request.repoContext.tsconfigProjects?.length ?? 0) === 0
+  ) {
+    return createTypeScriptStubExtractionResult(request)
+  }
+
+  const loadedProjects = loadTypeScriptProjectsFromRepoContext(
+    request.repoContext,
+  )
+  const sourceEntities = extractSourceEntities(
+    request.repoContext,
+    loadedProjects.changedSourceFiles,
+  )
+  const nonSourceEntities = request.repoContext.changedFiles
+    .filter((changedFile) => changedFile.kind !== "source")
+    .map((changedFile) =>
+      createTypeScriptStubEntity({
+        filePath: changedFile.path,
+        kind: changedFile.kind,
+      }),
+    )
+  const entities = [...sourceEntities, ...nonSourceEntities].sort(
+    (left, right) => left.id.localeCompare(right.id),
+  )
+  const diffReferences =
+    request.includeDiffHunks === false
+      ? []
+      : (request.repoContext.diffReferences ??
+        request.repoContext.changedFiles.map((changedFile) => ({
+          filePath: changedFile.path,
+          baseStartLine: 1,
+          baseLineCount: 1,
+          headStartLine: 1,
+          headLineCount: 1,
+        })))
+
+  return {
+    repoContext: request.repoContext,
+    entities,
+    relationships: [],
+    changes: entities.map((entity) => createTypeScriptStubChange(entity)),
+    diffReferences,
+  }
+}
+
 export const typeScriptExtractionAdapter: ExtractionAdapter = {
   language: "typescript",
   extract(request: ReviewRequest): ExtractionResult {
-    return createTypeScriptStubExtractionResult(request)
+    return createTypeScriptExtractionResult(request)
   },
 }
