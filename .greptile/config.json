@@ -1,0 +1,5 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "instructions": "Use AGENTS.md as workflow source of truth. Treat this repo as a pnpm TypeScript monorepo. Keep packages/core framework-neutral and flag coupling to framework/runtime-specific APIs. For changes affecting public behavior, JSON schema, OpenSpec-backed contracts, package boundaries, or release/install workflow, require matching OpenSpec change evidence under openspec/ before approval. Require evidence that pnpm lint, pnpm test, and pnpm typecheck passed."
+}
