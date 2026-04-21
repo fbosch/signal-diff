@@ -103,6 +103,9 @@ function collectAdjacentSourceFiles(
   changedSourceFiles: SourceFile[],
 ): Map<string, SourceFile> {
   const adjacentByPath = new Map<string, SourceFile>()
+  const changedSourceFilePaths = new Set(
+    changedSourceFiles.map((sourceFile) => sourceFile.getFilePath()),
+  )
 
   for (const changedSourceFile of changedSourceFiles) {
     for (const siblingSourceFile of changedSourceFile
@@ -113,6 +116,11 @@ function collectAdjacentSourceFiles(
       }
 
       const siblingFilePath = siblingSourceFile.getFilePath()
+
+      if (changedSourceFilePaths.has(siblingFilePath)) {
+        continue
+      }
+
       const siblingRelativePath = toRepoRelativePath(repoRoot, siblingFilePath)
 
       if (isTypeScriptSourcePath(siblingRelativePath) === false) {
@@ -132,6 +140,16 @@ export function loadTypeScriptProjectsFromRepoContext(
   const tsconfigProjects = [...(repoContext.tsconfigProjects ?? [])].sort(
     (left, right) => left.configPath.localeCompare(right.configPath),
   )
+  const changedTypeScriptPaths = collectChangedTypeScriptPaths(repoContext)
+
+  if (changedTypeScriptPaths.length === 0) {
+    return {
+      projects: [],
+      changedSourceFiles: [],
+      adjacentSourceFiles: [],
+    }
+  }
+
   const projects: LoadedTypeScriptProject[] = tsconfigProjects.map(
     (tsconfigProject) => ({
       configPath: tsconfigProject.configPath,
@@ -143,15 +161,6 @@ export function loadTypeScriptProjectsFromRepoContext(
       adjacentSourceFiles: [],
     }),
   )
-  const changedTypeScriptPaths = collectChangedTypeScriptPaths(repoContext)
-
-  if (changedTypeScriptPaths.length === 0) {
-    return {
-      projects,
-      changedSourceFiles: [],
-      adjacentSourceFiles: [],
-    }
-  }
 
   if (projects.length === 0) {
     throw new Error(

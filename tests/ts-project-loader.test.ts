@@ -124,6 +124,52 @@ test("ts-morph loader resolves changed and adjacent monorepo files", () => {
   }
 })
 
+test("ts-morph loader does not treat changed siblings as adjacent files", () => {
+  const { repoRoot, baseRef } = createTypeScriptLoaderFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    repoContext.changedFiles = [
+      { path: "packages/a/src/index.ts", kind: "source" },
+      { path: "packages/a/src/helper.ts", kind: "source" },
+    ]
+
+    const loaded = loadTypeScriptProjectsFromRepoContext(repoContext)
+
+    assert.equal(loaded.changedSourceFiles.length, 2)
+    assert.equal(loaded.adjacentSourceFiles.length, 0)
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("ts-morph loader skips project loading when no TypeScript source changed", () => {
+  const { repoRoot, baseRef } = createTypeScriptLoaderFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    repoContext.changedFiles = [{ path: "README.md", kind: "documentation" }]
+
+    const loaded = loadTypeScriptProjectsFromRepoContext(repoContext)
+
+    assert.equal(loaded.projects.length, 0)
+    assert.equal(loaded.changedSourceFiles.length, 0)
+    assert.equal(loaded.adjacentSourceFiles.length, 0)
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
 test("ts-morph loader fails loudly for unresolved tsconfig path", () => {
   const { repoRoot, baseRef } = createTypeScriptLoaderFixtureRepo()
 
