@@ -1,6 +1,9 @@
 [aliases]
-gate-push = "git push no-mistakes {{ branch }}"
-gate = "wt step commit && git push no-mistakes {{ branch }}"
+check = "wt hook pre-merge"
+gate-push = "wt hook pre-merge && git push no-mistakes {{ branch }}"
+gate = "wt step commit && wt hook pre-merge && git push no-mistakes {{ branch }}"
+pr = "gh pr create --base {{ default_branch }} --head {{ branch }} {{ args }}"
+ready-pr = "wt step commit && wt hook pre-merge && git push -u origin {{ branch }} && gh pr create --base {{ default_branch }} --head {{ branch }} {{ args }}"
 
 [pre-merge]
 validate = "pnpm lint && pnpm test && pnpm typecheck"
