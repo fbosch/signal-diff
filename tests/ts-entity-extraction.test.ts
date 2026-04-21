@@ -92,7 +92,13 @@ function createEntityFixtureRepo(): {
       "  return value + 1",
       "}",
       "",
+      "export const add = (a: number, b: number): number => a + b",
+      "",
       "export const UserView = () => <section>view</section>",
+      "",
+      "export const LegacyView = function LegacyView() {",
+      "  return <aside>legacy</aside>",
+      "}",
       "",
     ].join("\n"),
   )
@@ -123,7 +129,13 @@ function createEntityFixtureRepo(): {
       "  return value + 2",
       "}",
       "",
+      "export const add = (a: number, b: number): number => a + b",
+      "",
       "export const UserView = () => <section>updated</section>",
+      "",
+      "export const LegacyView = function LegacyView() {",
+      "  return <aside>legacy-updated</aside>",
+      "}",
       "",
     ].join("\n"),
   )
@@ -155,7 +167,13 @@ function createEntityFixtureRepo(): {
       "  return value + 3",
       "}",
       "",
+      "export const add = (a: number, b: number): number => a + b",
+      "",
       "export const UserView = () => <section>updated-again</section>",
+      "",
+      "export const LegacyView = function LegacyView() {",
+      "  return <aside>legacy-updated-again</aside>",
+      "}",
       "",
     ].join("\n"),
   )
@@ -199,6 +217,45 @@ test("typescript extraction emits canonical entity kinds from source constructs"
     assert.equal(entityKinds.has("method"), true)
     assert.equal(entityKinds.has("field"), true)
     assert.equal(entityKinds.has("render_unit"), true)
+    assert.equal(
+      extraction.entities.some(
+        (entity) => entity.kind === "function" && entity.name === "add",
+      ),
+      true,
+    )
+    assert.equal(
+      extraction.entities.some(
+        (entity) =>
+          entity.kind === "render_unit" && entity.name === "LegacyView",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction keeps non-TS source changes in entity output", () => {
+  const { repoRoot, baseRef } = createEntityFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef: "HEAD",
+    })
+
+    repoContext.changedFiles = [{ path: "scripts/build.js", kind: "source" }]
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+
+    assert.equal(extraction.entities.length, 1)
+    assert.equal(extraction.entities[0]?.modulePath, "scripts/build.js")
+    assert.equal(extraction.entities[0]?.kind, "module")
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }

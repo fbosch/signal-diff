@@ -42,7 +42,7 @@ interface CanonicalEntitySeed {
     startLine: number
     endLine: number
   }
-  scopeName: string
+  identityKey: string
 }
 
 function toAbsoluteRepoPath(repoRoot: string, filePath: string): string {
@@ -347,7 +347,11 @@ function hasJsxReturnBody(node: Node): boolean {
       .some((returnStatement) => isJsxLikeNode(returnStatement.getExpression()))
   }
 
-  if (Node.isFunctionDeclaration(node) || Node.isMethodDeclaration(node)) {
+  if (
+    Node.isFunctionDeclaration(node) ||
+    Node.isMethodDeclaration(node) ||
+    Node.isFunctionExpression(node)
+  ) {
     const body = node.getBody()
 
     if (body === undefined) {
@@ -360,6 +364,28 @@ function hasJsxReturnBody(node: Node): boolean {
   }
 
   return false
+}
+
+function getCallableIdentityKey(
+  name: string,
+  callable:
+    | import("ts-morph").FunctionDeclaration
+    | import("ts-morph").MethodDeclaration
+    | import("ts-morph").ArrowFunction
+    | import("ts-morph").FunctionExpression,
+): string {
+  const parameterIdentity = callable
+    .getParameters()
+    .map((parameter) => {
+      const restPrefix = parameter.isRestParameter() ? "..." : ""
+      const optionalSuffix = parameter.isOptional() ? "?" : ""
+      const typeNode = parameter.getTypeNode()
+      const typeSuffix = typeNode === undefined ? "" : `:${typeNode.getText()}`
+      return `${restPrefix}${parameter.getName()}${optionalSuffix}${typeSuffix}`
+    })
+    .join(",")
+
+  return `${name}(${parameterIdentity})`
 }
 
 function getSeedLocation(node: Node): { startLine: number; endLine: number } {
@@ -382,7 +408,7 @@ function getModuleEntitySeed(
       startLine: 1,
       endLine: sourceFile.getEndLineNumber(),
     },
-    scopeName: "module",
+    identityKey: "module",
   }
 }
 
@@ -409,7 +435,7 @@ function collectTopLevelEntitySeeds(
         modulePath,
         exported: statement.isExported(),
         location: getSeedLocation(statement),
-        scopeName: functionName,
+        identityKey: getCallableIdentityKey(functionName, statement),
       })
       continue
     }
@@ -422,7 +448,7 @@ function collectTopLevelEntitySeeds(
         modulePath,
         exported: statement.isExported(),
         location: getSeedLocation(statement),
-        scopeName: contractName,
+        identityKey: contractName,
       })
       continue
     }
@@ -441,7 +467,7 @@ function collectTopLevelEntitySeeds(
           modulePath,
           exported: statement.isExported(),
           location: getSeedLocation(statement),
-          scopeName: typeName,
+          identityKey: typeName,
         })
       }
 
@@ -455,7 +481,7 @@ function collectTopLevelEntitySeeds(
               modulePath,
               exported: false,
               location: getSeedLocation(member),
-              scopeName: `${typeName ?? "class"}.${methodName}`,
+              identityKey: `${typeName ?? "class"}.${getCallableIdentityKey(methodName, member)}`,
             })
             continue
           }
@@ -468,7 +494,7 @@ function collectTopLevelEntitySeeds(
               modulePath,
               exported: false,
               location: getSeedLocation(member),
-              scopeName: `${typeName ?? "class"}.${fieldName}`,
+              identityKey: `${typeName ?? "class"}.${fieldName}`,
             })
           }
         }
@@ -488,18 +514,15 @@ function collectTopLevelEntitySeeds(
           continue
         }
 
-        if (hasJsxReturnBody(initializer) === false) {
-          continue
-        }
-
         const renderName = declaration.getName()
+        const isRenderUnit = hasJsxReturnBody(initializer)
         seeds.push({
-          kind: "render_unit",
+          kind: isRenderUnit ? "render_unit" : "function",
           name: renderName,
           modulePath,
           exported: statement.isExported(),
           location: getSeedLocation(declaration),
-          scopeName: renderName,
+          identityKey: getCallableIdentityKey(renderName, initializer),
         })
       }
     }
@@ -514,7 +537,9 @@ function createCanonicalEntityFromSeed(
 ): CanonicalEntity {
   const features = createEmptyCanonicalFeatures(seed.modulePath)
   const scopedId =
-    ordinal === 0 ? seed.scopeName : `${seed.scopeName}:${String(ordinal + 1)}`
+    ordinal === 0
+      ? seed.identityKey
+      : `${seed.identityKey}:${String(ordinal + 1)}`
 
   return {
     id: `ts:${seed.modulePath}#${seed.kind}:${scopedId}`,
@@ -542,6 +567,10 @@ function buildCanonicalEntitiesFromSeeds(
         return left.modulePath.localeCompare(right.modulePath)
       }
 
+      if (left.identityKey !== right.identityKey) {
+        return left.identityKey.localeCompare(right.identityKey)
+      }
+
       if (left.location.startLine !== right.location.startLine) {
         return left.location.startLine - right.location.startLine
       }
@@ -550,10 +579,10 @@ function buildCanonicalEntitiesFromSeeds(
         return left.location.endLine - right.location.endLine
       }
 
-      return left.scopeName.localeCompare(right.scopeName)
+      return left.name.localeCompare(right.name)
     })
     .map((seed) => {
-      const scopeKey = `${seed.modulePath}#${seed.kind}:${seed.scopeName}`
+      const scopeKey = `${seed.modulePath}#${seed.kind}:${seed.identityKey}`
       const nextOrdinal = ordinalByScope.get(scopeKey) ?? 0
       ordinalByScope.set(scopeKey, nextOrdinal + 1)
       return createCanonicalEntityFromSeed(seed, nextOrdinal)
@@ -595,8 +624,17 @@ export function createTypeScriptExtractionResult(
     request.repoContext,
     loadedProjects.changedSourceFiles,
   )
+  const extractedSourceModulePaths = new Set(
+    sourceEntities
+      .filter((entity) => entity.kind === "module")
+      .map((entity) => entity.modulePath),
+  )
   const nonSourceEntities = request.repoContext.changedFiles
-    .filter((changedFile) => changedFile.kind !== "source")
+    .filter(
+      (changedFile) =>
+        changedFile.kind !== "source" ||
+        extractedSourceModulePaths.has(changedFile.path) === false,
+    )
     .map((changedFile) =>
       createTypeScriptStubEntity({
         filePath: changedFile.path,
