@@ -15,6 +15,7 @@
     "dist"
   ],
   "dependencies": {
-    "@signal-diff/core": "workspace:*"
+    "@signal-diff/core": "workspace:*",
+    "ts-morph": "^23.0.0"
   }
 }
