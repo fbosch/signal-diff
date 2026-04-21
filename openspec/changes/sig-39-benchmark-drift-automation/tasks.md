@@ -1,8 +1,8 @@
 ## 1. Benchmark Harness
 
-- [ ] 1.1 Add deterministic benchmark fixtures and scenario definitions for hot paths.
-- [ ] 1.2 Add benchmark entrypoint(s) for local and CI execution.
-- [ ] 1.3 Capture benchmark execution controls (warmup, iteration count, sample sizing).
+- [x] 1.1 Add deterministic benchmark fixtures and scenario definitions for hot paths.
+- [x] 1.2 Add benchmark entrypoint(s) for local and CI execution.
+- [x] 1.3 Capture benchmark execution controls (warmup, iteration count, sample sizing).
 
 ## 2. Result Contract And Baselines
 
