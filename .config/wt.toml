@@ -1,0 +1,6 @@
+[aliases]
+gate-push = "git push no-mistakes {{ branch }}"
+gate = "wt step commit && git push no-mistakes {{ branch }}"
+
+[pre-merge]
+validate = "pnpm lint && pnpm test && pnpm typecheck"

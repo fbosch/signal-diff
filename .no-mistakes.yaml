@@ -1,0 +1,4 @@
+agent: auto
+commands:
+  lint: "pnpm lint"
+  test: "pnpm test && pnpm typecheck"
