@@ -44,14 +44,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BENCHMARK_TREND_WINDOW: ${{ vars.BENCHMARK_TREND_WINDOW || '5' }}
+          BENCHMARK_TREND_HISTORY_DIR: ${{ runner.temp }}/benchmark-trend-history
         run: |
-          mkdir -p benchmarks/artifacts/trend-history
+          rm -rf "$BENCHMARK_TREND_HISTORY_DIR"
+          mkdir -p "$BENCHMARK_TREND_HISTORY_DIR"
           target_history_count=$((BENCHMARK_TREND_WINDOW - 1))
           if [ "$target_history_count" -le 0 ]; then
             echo "Skipping history download because BENCHMARK_TREND_WINDOW=$BENCHMARK_TREND_WINDOW"
             exit 0
           fi
-          mapfile -t run_ids < <(gh api "repos/${{ github.repository }}/actions/workflows/benchmark-trend.yml/runs" -f branch=master -f status=success -f per_page=30 --jq '.workflow_runs[] | .id')
+          mapfile -t run_ids < <(gh api "repos/${{ github.repository }}/actions/workflows/benchmark-trend.yml/runs" -f branch=master -f per_page=30 --jq '.workflow_runs[] | .id')
           downloaded=0
           for run_id in "${run_ids[@]}"; do
             if [ "$downloaded" -ge "$target_history_count" ]; then
@@ -60,7 +62,7 @@ jobs:
             if [ "$run_id" = "${{ github.run_id }}" ]; then
               continue
             fi
-            output_dir="benchmarks/artifacts/trend-history/$run_id"
+            output_dir="$BENCHMARK_TREND_HISTORY_DIR/$run_id"
             if gh run download "$run_id" -n benchmark-trend-master -D "$output_dir"; then
               downloaded=$((downloaded + 1))
               continue
@@ -72,10 +74,11 @@ jobs:
       - name: Render benchmark trend summary
         env:
           BENCHMARK_TREND_WINDOW: ${{ vars.BENCHMARK_TREND_WINDOW || '5' }}
+          BENCHMARK_TREND_HISTORY_DIR: ${{ runner.temp }}/benchmark-trend-history
         run: |
           pnpm tsx benchmarks/trend.ts \
             --current=benchmarks/artifacts/benchmark-trend-results.json \
-            --history-dir=benchmarks/artifacts/trend-history \
+            --history-dir=${BENCHMARK_TREND_HISTORY_DIR} \
             --window=${BENCHMARK_TREND_WINDOW} \
             --summary=benchmarks/artifacts/benchmark-trend-summary.md \
             --output=benchmarks/artifacts/benchmark-trend-summary.json
