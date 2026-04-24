@@ -113,3 +113,12 @@ test("drift summary includes machine-readable top regressions and improvements",
   assert.equal(summary.top_improvements.length, 1)
   assert.equal(summary.top_improvements[0]?.id, "parse-diff-hunks")
 })
+
+test("mixed-metric scenario is excluded from both highlight lists", () => {
+  const baseline = createResult(100, 120)
+  const current = createResult(130, 108)
+  const summary = analyzeBenchmarkDrift(baseline, current)
+
+  assert.equal(summary.top_regressions.length, 0)
+  assert.equal(summary.top_improvements.length, 0)
+})

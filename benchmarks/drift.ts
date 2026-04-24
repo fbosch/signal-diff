@@ -180,7 +180,8 @@ function topRegressions(scenarioDrifts: ScenarioDrift[]): ScenarioDrift[] {
   return [...scenarioDrifts]
     .filter(
       (scenario) =>
-        Math.max(scenario.mean_delta_percent, scenario.p95_delta_percent) > 0,
+        Math.max(scenario.mean_delta_percent, scenario.p95_delta_percent) > 0 &&
+        Math.min(scenario.mean_delta_percent, scenario.p95_delta_percent) >= 0,
     )
     .sort(
       (left, right) =>
@@ -194,7 +195,8 @@ function topImprovements(scenarioDrifts: ScenarioDrift[]): ScenarioDrift[] {
   return [...scenarioDrifts]
     .filter(
       (scenario) =>
-        Math.min(scenario.mean_delta_percent, scenario.p95_delta_percent) < 0,
+        Math.min(scenario.mean_delta_percent, scenario.p95_delta_percent) < 0 &&
+        Math.max(scenario.mean_delta_percent, scenario.p95_delta_percent) <= 0,
     )
     .sort(
       (left, right) =>
