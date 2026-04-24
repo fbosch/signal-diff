@@ -19,10 +19,10 @@
 ## 4. Reporting And Documentation
 
 - [x] 4.1 Add drift reporting outputs (machine-readable and human-readable).
-- [ ] 4.2 Add maintainer runbook for baseline refresh and threshold tuning.
-- [ ] 4.3 Add troubleshooting guidance for benchmark noise and CI environment variance.
+- [x] 4.2 Add maintainer runbook for baseline refresh and threshold tuning.
+- [x] 4.3 Add troubleshooting guidance for benchmark noise and CI environment variance.
 
 ## 5. Validation
 
-- [ ] 5.1 Run `pnpm lint`, `pnpm test`, and `pnpm typecheck`.
-- [ ] 5.2 Run `openspec validate sig-39-benchmark-drift-automation`.
+- [x] 5.1 Run `pnpm lint`, `pnpm test`, and `pnpm typecheck`.
+- [x] 5.2 Run `openspec validate sig-39-benchmark-drift-automation`.
