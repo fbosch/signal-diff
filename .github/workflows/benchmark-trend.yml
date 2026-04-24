@@ -5,6 +5,10 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   benchmark-trend:
     name: Benchmark Trend (master)
@@ -36,9 +40,45 @@ jobs:
           mkdir -p benchmarks/artifacts
           pnpm tsx benchmarks/run.ts --json > benchmarks/artifacts/benchmark-trend-results.json
 
-      - name: Render benchmark trend summary
+      - name: Download recent trend history artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCHMARK_TREND_WINDOW: ${{ vars.BENCHMARK_TREND_WINDOW || '5' }}
         run: |
-          node -e "const fs=require('node:fs'); const result=JSON.parse(fs.readFileSync('benchmarks/artifacts/benchmark-trend-results.json','utf8')); const lines=['## Benchmark Trend Run','',`Commit: ${result.git_commit}`,'',`Runtime: ${result.runtime.node_version} ${result.runtime.platform}/${result.runtime.arch}`,'',`Controls: warmup=${result.controls.warmup}, samples=${result.controls.samples}, iterations=${result.controls.iterations}`,'','Scenario | Mean (ms) | P95 (ms)','--- | ---: | ---:']; for (const s of result.scenarios){lines.push(`${s.id} | ${Number(s.mean_ms).toFixed(4)} | ${Number(s.p95_ms).toFixed(4)}`);} fs.writeFileSync('benchmarks/artifacts/benchmark-trend-summary.md', `${lines.join('\\n')}\\n`);"
+          mkdir -p benchmarks/artifacts/trend-history
+          target_history_count=$((BENCHMARK_TREND_WINDOW - 1))
+          if [ "$target_history_count" -le 0 ]; then
+            echo "Skipping history download because BENCHMARK_TREND_WINDOW=$BENCHMARK_TREND_WINDOW"
+            exit 0
+          fi
+          mapfile -t run_ids < <(gh api "repos/${{ github.repository }}/actions/workflows/benchmark-trend.yml/runs" -f branch=master -f status=success -f per_page=30 --jq '.workflow_runs[] | .id')
+          downloaded=0
+          for run_id in "${run_ids[@]}"; do
+            if [ "$downloaded" -ge "$target_history_count" ]; then
+              break
+            fi
+            if [ "$run_id" = "${{ github.run_id }}" ]; then
+              continue
+            fi
+            output_dir="benchmarks/artifacts/trend-history/$run_id"
+            if gh run download "$run_id" -n benchmark-trend-master -D "$output_dir"; then
+              downloaded=$((downloaded + 1))
+              continue
+            fi
+            rm -rf "$output_dir"
+          done
+          echo "Downloaded $downloaded historical benchmark trend artifacts"
+
+      - name: Render benchmark trend summary
+        env:
+          BENCHMARK_TREND_WINDOW: ${{ vars.BENCHMARK_TREND_WINDOW || '5' }}
+        run: |
+          pnpm tsx benchmarks/trend.ts \
+            --current=benchmarks/artifacts/benchmark-trend-results.json \
+            --history-dir=benchmarks/artifacts/trend-history \
+            --window=${BENCHMARK_TREND_WINDOW} \
+            --summary=benchmarks/artifacts/benchmark-trend-summary.md \
+            --output=benchmarks/artifacts/benchmark-trend-summary.json
 
       - name: Publish benchmark trend summary
         if: always()
@@ -48,6 +88,18 @@ jobs:
             exit 0
           fi
           cat benchmarks/artifacts/benchmark-trend-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Emit trend window completeness warning
+        if: always()
+        run: |
+          if [ ! -f benchmarks/artifacts/benchmark-trend-summary.json ]; then
+            echo "::warning::benchmark-trend-summary.json not found; skipping trend-window warning."
+            exit 0
+          fi
+          missing=$(node -e "const fs=require('node:fs'); const summary=JSON.parse(fs.readFileSync('benchmarks/artifacts/benchmark-trend-summary.json','utf8')); process.stdout.write(String(summary.missing_runs));")
+          if [ "$missing" -gt 0 ]; then
+            echo "::warning::Benchmark trend summary missing $missing run(s) from configured window."
+          fi
 
       - name: Upload trend artifacts
         if: always()
