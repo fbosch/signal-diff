@@ -149,8 +149,15 @@ Scheduled benchmark trend runs publish:
 Trend summary fields to inspect first:
 
 - `window_size`, `included_runs`, `missing_runs`
+- `guardrail_status`, `guardrail_messages`
 - `runtime_signatures` and `controls_signatures`
 - `top_regressions` and `top_improvements`
+
+Guardrail policy:
+
+- `PASS`: runtime and controls signatures are consistent across window
+- `WARN`: controls are consistent, runtime signatures differ
+- `FAIL`: controls signatures differ across window (trend is not comparable)
 
 Interpretation rules:
 
@@ -167,6 +174,19 @@ Actions:
 1. Verify `BENCHMARK_TREND_WINDOW` is realistic for available historical runs.
 2. Confirm prior scheduled runs completed successfully and uploaded `benchmark-trend-master` artifacts.
 3. Re-run trend workflow manually after next successful scheduled run to fill window depth.
+
+### Troubleshooting guardrail warning or failure
+
+If `guardrail_status` is `WARN`:
+
+1. Confirm runner image/runtime churn (for example Node patch updates) in recent runs.
+2. Treat trend highlights as directional only until runtime signatures converge.
+
+If `guardrail_status` is `FAIL`:
+
+1. Align benchmark controls so all scheduled runs use identical `warmup/samples/iterations`.
+2. Wait for enough new runs to replace incompatible history in the trend window.
+3. Re-run the workflow after controls have stabilized to restore comparable trend signals.
 
 ## Required checks after baseline or threshold changes
 

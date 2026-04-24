@@ -15,31 +15,47 @@ interface ScenarioInput {
   p95_ms: number
 }
 
+interface ResultOptions {
+  runtime?: {
+    node_version: string
+    platform: string
+    arch: string
+  }
+  controls?: {
+    warmup: number
+    samples: number
+    iterations: number
+  }
+}
+
 function createResult(
   generatedAt: string,
   gitCommit: string,
   scenarios: ScenarioInput[],
+  options: ResultOptions = {},
 ): BenchmarkResultsV1 {
+  const controls = options.controls ?? {
+    warmup: 2,
+    samples: 12,
+    iterations: 30,
+  }
+
   return {
     schema_version: BENCHMARK_RESULT_SCHEMA_VERSION,
     generated_at: generatedAt,
     git_commit: gitCommit,
-    runtime: {
+    runtime: options.runtime ?? {
       node_version: "v22.0.0",
       platform: "linux",
       arch: "x64",
     },
-    controls: {
-      warmup: 2,
-      samples: 12,
-      iterations: 30,
-    },
+    controls,
     scenarios: scenarios.map((scenario) => ({
       id: scenario.id,
       description: scenario.id,
-      warmup: 2,
-      samples: 12,
-      iterations: 30,
+      warmup: controls.warmup,
+      samples: controls.samples,
+      iterations: controls.iterations,
       checksum: 100,
       min_ms: scenario.mean_ms,
       p50_ms: scenario.mean_ms,
@@ -71,6 +87,7 @@ test("trend summary ranks sustained regressions and improvements", () => {
 
   assert.equal(summary.included_runs, 3)
   assert.equal(summary.missing_runs, 2)
+  assert.equal(summary.guardrail_status, "pass")
   assert.equal(summary.top_regressions.length, 1)
   assert.equal(summary.top_regressions[0]?.id, "scenario-regress")
   assert.equal(summary.top_improvements.length, 1)
@@ -100,6 +117,71 @@ test("trend markdown includes window and sustained sections", () => {
   const markdown = renderBenchmarkTrendMarkdown(summary)
 
   assert.match(markdown, /Window: 2\/4 runs \(missing 2\)/)
+  assert.match(markdown, /Guardrail status: PASS/)
   assert.match(markdown, /Top sustained regressions/)
   assert.match(markdown, /scenario-regress/)
+})
+
+test("trend guardrail warns on runtime mismatch with consistent controls", () => {
+  const run1 = createResult(
+    "2026-04-20T06:00:00.000Z",
+    "a",
+    [{ id: "scenario-regress", mean_ms: 100, p95_ms: 120 }],
+    {
+      runtime: {
+        node_version: "v22.0.0",
+        platform: "linux",
+        arch: "x64",
+      },
+    },
+  )
+  const run2 = createResult(
+    "2026-04-21T06:00:00.000Z",
+    "b",
+    [{ id: "scenario-regress", mean_ms: 110, p95_ms: 130 }],
+    {
+      runtime: {
+        node_version: "v24.0.0",
+        platform: "linux",
+        arch: "x64",
+      },
+    },
+  )
+
+  const summary = analyzeBenchmarkTrend(run2, [run1], 5)
+
+  assert.equal(summary.guardrail_status, "warn")
+  assert.match(summary.guardrail_messages.join("\n"), /Runtime mismatch/)
+})
+
+test("trend guardrail fails on controls mismatch", () => {
+  const run1 = createResult(
+    "2026-04-20T06:00:00.000Z",
+    "a",
+    [{ id: "scenario-regress", mean_ms: 100, p95_ms: 120 }],
+    {
+      controls: {
+        warmup: 2,
+        samples: 12,
+        iterations: 30,
+      },
+    },
+  )
+  const run2 = createResult(
+    "2026-04-21T06:00:00.000Z",
+    "b",
+    [{ id: "scenario-regress", mean_ms: 110, p95_ms: 130 }],
+    {
+      controls: {
+        warmup: 1,
+        samples: 8,
+        iterations: 25,
+      },
+    },
+  )
+
+  const summary = analyzeBenchmarkTrend(run2, [run1], 5)
+
+  assert.equal(summary.guardrail_status, "fail")
+  assert.match(summary.guardrail_messages.join("\n"), /Controls mismatch/)
 })

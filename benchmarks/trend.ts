@@ -15,6 +15,7 @@ const DEFAULT_TREND_WINDOW = 5
 const TOP_SCENARIOS_LIMIT = 3
 
 type TrendSource = "current" | "history"
+export type TrendGuardrailStatus = "pass" | "warn" | "fail"
 
 export interface BenchmarkTrendRun {
   generated_at: string
@@ -45,10 +46,42 @@ export interface BenchmarkTrendSummary {
   effective_sample_size: number
   runtime_signatures: string[]
   controls_signatures: string[]
+  guardrail_status: TrendGuardrailStatus
+  guardrail_messages: string[]
   runs: BenchmarkTrendRun[]
   scenarios: ScenarioTrendSummary[]
   top_regressions: ScenarioTrendSummary[]
   top_improvements: ScenarioTrendSummary[]
+}
+
+function evaluateGuardrails(
+  runtimeSignatures: string[],
+  controlsSignatures: string[],
+): { status: TrendGuardrailStatus; messages: string[] } {
+  const messages: string[] = []
+  let status: TrendGuardrailStatus = "pass"
+
+  if (controlsSignatures.length > 1) {
+    status = "fail"
+    messages.push(
+      "Controls mismatch across trend window; trend deltas are not comparable.",
+    )
+  }
+
+  if (runtimeSignatures.length > 1) {
+    if (status === "pass") {
+      status = "warn"
+    }
+    messages.push(
+      "Runtime mismatch across trend window; trend deltas may include environment noise.",
+    )
+  }
+
+  if (messages.length === 0) {
+    messages.push("Runtime and controls are consistent across trend window.")
+  }
+
+  return { status, messages }
 }
 
 interface TrendControls {
@@ -387,6 +420,7 @@ export function analyzeBenchmarkTrend(
   const controlsSignatures = [
     ...new Set(selectedRuns.map((run) => toControlsSignature(run.controls))),
   ].sort()
+  const guardrails = evaluateGuardrails(runtimeSignatures, controlsSignatures)
 
   return {
     schema_version: BENCHMARK_RESULT_SCHEMA_VERSION,
@@ -397,6 +431,8 @@ export function analyzeBenchmarkTrend(
     effective_sample_size: selectedRuns.length,
     runtime_signatures: runtimeSignatures,
     controls_signatures: controlsSignatures,
+    guardrail_status: guardrails.status,
+    guardrail_messages: guardrails.messages,
     runs: selectedRuns,
     scenarios: scenarioSummaries,
     top_regressions: regressions,
@@ -411,6 +447,7 @@ export function renderBenchmarkTrendMarkdown(
     "## Benchmark Trend Summary",
     "",
     `Window: ${summary.included_runs}/${summary.window_size} runs (missing ${summary.missing_runs})`,
+    `Guardrail status: ${summary.guardrail_status.toUpperCase()}`,
     `Runtime coverage: ${summary.runtime_signatures.join(", ") || "unknown"}`,
     `Controls coverage: ${summary.controls_signatures.join(", ") || "unknown"}`,
     "",
@@ -422,6 +459,12 @@ export function renderBenchmarkTrendMarkdown(
     lines.push(
       `${scenario.id} | ${scenario.effective_sample_size} | ${formatPercent(scenario.mean_delta_percent)} | ${formatPercent(scenario.p95_delta_percent)}`,
     )
+  }
+
+  lines.push("", "Guardrail notes")
+
+  for (const message of summary.guardrail_messages) {
+    lines.push(`- ${message}`)
   }
 
   if (summary.top_regressions.length > 0) {
