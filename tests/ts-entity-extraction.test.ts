@@ -636,6 +636,155 @@ test("typescript extraction computes contract shape deltas from base/head", () =
   }
 })
 
+test("typescript extraction counts all interface members in contract shape deltas", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/callable-contract.ts",
+      [
+        "export interface CallableContract {",
+        "  (id: string): string",
+        "  value?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add callable contract"])
+    const contractBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/callable-contract.ts",
+      [
+        "export interface CallableContract {",
+        "  (id: string): string",
+        "  new (id: string): Date",
+        "  [key: string]: string | Date",
+        "  value?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change callable contract"])
+    const contractHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: contractBaseRef,
+      headRef: contractHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const contractEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "contract" && entity.name === "CallableContract",
+    )
+
+    assert.equal(contractEntity !== undefined, true)
+
+    const contractChange = extraction.changes.find(
+      (change) => change.entityId === contractEntity?.id,
+    )
+
+    assert.deepEqual(contractChange?.featureDeltas.signature.memberCount, {
+      before: 2,
+      after: 4,
+    })
+    assert.deepEqual(
+      contractChange?.featureDeltas.signature.optionalMemberCount,
+      {
+        before: 1,
+        after: 1,
+      },
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction matches contract shape nodes by entity kind before name", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/merged.ts",
+      [
+        "export interface Merged {",
+        "  id: string",
+        "}",
+        "",
+        "export class Merged {",
+        "  value = 1",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add merged declarations"])
+    const mergedBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/merged.ts",
+      [
+        "export interface Merged {",
+        "  id: string",
+        "}",
+        "",
+        "export class Merged {",
+        "  value = 1",
+        "  label?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change merged class"])
+    const mergedHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: mergedBaseRef,
+      headRef: mergedHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const mergedClassEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "type_like_entity" && entity.name === "Merged",
+    )
+
+    assert.equal(mergedClassEntity !== undefined, true)
+
+    const mergedClassChange = extraction.changes.find(
+      (change) => change.entityId === mergedClassEntity?.id,
+    )
+
+    assert.deepEqual(mergedClassChange?.featureDeltas.signature.memberCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(
+      mergedClassChange?.featureDeltas.signature.optionalMemberCount,
+      {
+        before: 0,
+        after: 1,
+      },
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
 test("typescript extraction parses structural snapshots with matching TypeScript extension", () => {
   const { repoRoot } = createEntityFixtureRepo()
 
