@@ -44,7 +44,8 @@
         }
       ],
       "supporting_notes": [
-        "Stub heuristic wires canonical change and diff evidence through the core review model."
+        "Stub heuristic wires canonical change and diff evidence through the core review model.",
+        "Detected 0 change(s) with topology.importFanOut feature deltas."
       ]
     }
   ],

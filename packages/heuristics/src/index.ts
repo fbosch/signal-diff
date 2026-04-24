@@ -25,6 +25,10 @@ export function inferStubHeuristicResult(
     }
   }
 
+  const topologyImportFanOutDeltaCount = context.changes.filter(
+    (change) => change.featureDeltas.topology.importFanOut !== undefined,
+  ).length
+
   const evidence: ReviewEvidence = {
     id: "evidence:changed-entities",
     changedEntityIds: context.entities.map((entity) => entity.id),
@@ -36,6 +40,7 @@ export function inferStubHeuristicResult(
     diffHunks: context.diffReferences,
     supportingNotes: [
       "Stub heuristic wires canonical change and diff evidence through the core review model.",
+      `Detected ${topologyImportFanOutDeltaCount} change(s) with topology.importFanOut feature deltas.`,
     ],
   }
 
