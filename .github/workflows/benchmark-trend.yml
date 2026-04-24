@@ -1,0 +1,65 @@
+name: Benchmark Trend Collection
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  benchmark-trend:
+    name: Benchmark Trend (master)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Run benchmark trend profile
+        run: |
+          mkdir -p benchmarks/artifacts
+          pnpm tsx benchmarks/run.ts --json > benchmarks/artifacts/benchmark-trend-results.json
+
+      - name: Render benchmark trend summary
+        run: |
+          node -e "const fs=require('node:fs'); const result=JSON.parse(fs.readFileSync('benchmarks/artifacts/benchmark-trend-results.json','utf8')); const lines=['## Benchmark Trend Run','',`Commit: ${result.git_commit}`,'',`Runtime: ${result.runtime.node_version} ${result.runtime.platform}/${result.runtime.arch}`,'',`Controls: warmup=${result.controls.warmup}, samples=${result.controls.samples}, iterations=${result.controls.iterations}`,'','Scenario | Mean (ms) | P95 (ms)','--- | ---: | ---:']; for (const s of result.scenarios){lines.push(`${s.id} | ${Number(s.mean_ms).toFixed(4)} | ${Number(s.p95_ms).toFixed(4)}`);} fs.writeFileSync('benchmarks/artifacts/benchmark-trend-summary.md', `${lines.join('\\n')}\\n`);"
+
+      - name: Publish benchmark trend summary
+        if: always()
+        run: |
+          if [ ! -f benchmarks/artifacts/benchmark-trend-summary.md ]; then
+            echo "::warning::benchmark-trend-summary.md not found; benchmark run likely failed earlier."
+            exit 0
+          fi
+          cat benchmarks/artifacts/benchmark-trend-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload trend artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-trend-master
+          path: benchmarks/artifacts/*
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Emit explicit failure signal
+        if: failure()
+        run: |
+          echo "::error::Benchmark trend collection failed. Inspect step logs and artifacts for details."
+          exit 1
