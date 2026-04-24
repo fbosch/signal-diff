@@ -36,7 +36,7 @@ jobs:
       - name: Run benchmark profile
         run: |
           mkdir -p benchmarks/artifacts
-          pnpm tsx benchmarks/run.ts --warmup=1 --samples=8 --iterations=25 --json > benchmarks/artifacts/current-benchmark-results.json
+          pnpm tsx benchmarks/run.ts --json > benchmarks/artifacts/current-benchmark-results.json
 
       - name: Compare against baseline
         id: compare

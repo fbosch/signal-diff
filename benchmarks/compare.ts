@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs"
+import { pathToFileURL } from "node:url"
 import {
   assertBenchmarkResultsV1,
   assertBenchmarkSchemaCompatibility,
@@ -10,6 +11,37 @@ import {
   type DriftSummary,
   renderDriftMarkdown,
 } from "./drift.ts"
+
+function controlsSignature(result: BenchmarkResultsV1): string {
+  return `${result.controls.warmup}/${result.controls.samples}/${result.controls.iterations}`
+}
+
+function runtimeSignature(result: BenchmarkResultsV1): string {
+  return `${result.runtime.node_version} ${result.runtime.platform}/${result.runtime.arch}`
+}
+
+export function assertComparableBenchmarkRuns(
+  baseline: BenchmarkResultsV1,
+  current: BenchmarkResultsV1,
+): void {
+  const baselineControls = controlsSignature(baseline)
+  const currentControls = controlsSignature(current)
+
+  if (baselineControls !== currentControls) {
+    throw new Error(
+      `Benchmark controls mismatch: baseline=${baselineControls}, current=${currentControls}. Re-run benchmark with matching --warmup/--samples/--iterations controls before drift comparison.`,
+    )
+  }
+
+  const baselineRuntime = runtimeSignature(baseline)
+  const currentRuntime = runtimeSignature(current)
+
+  if (baselineRuntime !== currentRuntime) {
+    process.stderr.write(
+      `Benchmark runtime mismatch: baseline=${baselineRuntime}, current=${currentRuntime}. Drift comparison can be noisy across runtimes.\n`,
+    )
+  }
+}
 
 interface CompareControls {
   baselinePath: string
@@ -99,10 +131,11 @@ function hasFailure(summary: DriftSummary): boolean {
   return summary.overall_status === "fail"
 }
 
-function main(): void {
+export function runCompareCli(): void {
   const controls = parseControls(process.argv.slice(2))
   const baseline = readBenchmarkResults(controls.baselinePath)
   const current = readBenchmarkResults(controls.currentPath)
+  assertComparableBenchmarkRuns(baseline, current)
   const summary = analyzeBenchmarkDrift(
     baseline,
     current,
@@ -119,4 +152,10 @@ function main(): void {
   }
 }
 
-main()
+const executedAsScript =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (executedAsScript) {
+  runCompareCli()
+}
