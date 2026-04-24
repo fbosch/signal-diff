@@ -90,6 +90,9 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
+      "  if (value > 0) {",
+      "    return Math.abs(value) + 1",
+      "  }",
       "  return value + 1",
       "}",
       "",
@@ -131,6 +134,9 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
+      "  if (value > 0) {",
+      "    return Math.abs(value) + 2",
+      "  }",
       "  return value + 2",
       "}",
       "",
@@ -177,7 +183,17 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
-      "  return value + 3",
+      "  try {",
+      "    if (value > 0) {",
+      "      return Math.max(value, 1) + 3",
+      "    }",
+      "    if (value === 0) {",
+      '      return Number.parseInt("0", 10)',
+      "    }",
+      "    return value + 3",
+      "  } catch {",
+      "    return 0",
+      "  }",
       "}",
       "",
       "export const add = (a: number, b: number): number => a + b",
@@ -405,6 +421,109 @@ test("typescript extraction reports explicit fallback when module delta unavaila
     assert.equal(
       addedModuleChange?.featureDeltas.summary.includes(
         "Skipped topology.importFanOut delta because base/head module content was unavailable.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction computes function structural deltas from base/head", () => {
+  const { repoRoot, baseRef, headRef } = createEntityFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const helperEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "helper",
+    )
+
+    assert.equal(helperEntity !== undefined, true)
+
+    const helperChange = extraction.changes.find(
+      (change) => change.entityId === helperEntity?.id,
+    )
+
+    assert.equal(helperChange !== undefined, true)
+    assert.deepEqual(helperChange?.featureDeltas.structural.branchCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(helperChange?.featureDeltas.structural.helperCallCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(helperChange?.featureDeltas.structural.hasTryCatch, {
+      before: false,
+      after: true,
+    })
+    assert.equal(
+      helperChange?.featureDeltas.summary.includes(
+        "Function structure changed branches 1 -> 2, helper calls 1 -> 2, try/catch false -> true.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction reports explicit fallback when function structural delta unavailable", () => {
+  const { repoRoot, headRef } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/new-function.ts",
+      [
+        "export function fresh(value: number): number {",
+        "  if (value > 0) {",
+        "    return Math.abs(value)",
+        "  }",
+        "  return value",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add function"])
+    const newHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: headRef,
+      headRef: newHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const freshEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "fresh",
+    )
+
+    assert.equal(freshEntity !== undefined, true)
+
+    const freshChange = extraction.changes.find(
+      (change) => change.entityId === freshEntity?.id,
+    )
+
+    assert.equal(freshChange !== undefined, true)
+    assert.equal(freshChange?.featureDeltas.structural.branchCount, undefined)
+    assert.equal(
+      freshChange?.featureDeltas.summary.includes(
+        "Skipped structural feature deltas because base/head callable content was unavailable.",
       ),
       true,
     )
