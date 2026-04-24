@@ -7,6 +7,8 @@ import type {
   EntityChange,
   ExtractionAdapter,
   ExtractionResult,
+  InputCategory,
+  OutputCategory,
   PublicRole,
   RepoContext,
   ReviewRequest,
@@ -261,6 +263,7 @@ export function createTypeScriptStubChange(
   repoContext: RepoContext,
 ): EntityChange {
   const summary = [`Detected a changed ${entity.kind} at ${entity.modulePath}.`]
+  const signatureDeltas: EntityChange["featureDeltas"]["signature"] = {}
   const structuralDeltas: EntityChange["featureDeltas"]["structural"] = {}
   const topologyDeltas: EntityChange["featureDeltas"]["topology"] = {}
 
@@ -283,7 +286,26 @@ export function createTypeScriptStubChange(
   }
 
   if (isFunctionLikeEntity(entity)) {
+    const signatureDelta = resolveFunctionSignatureDelta(repoContext, entity)
     const structuralDelta = resolveFunctionStructuralDelta(repoContext, entity)
+
+    if (signatureDelta === null) {
+      summary.push(
+        "Skipped signature feature deltas because base/head callable content was unavailable.",
+      )
+    } else {
+      signatureDeltas.inputArity = signatureDelta.inputArity
+      signatureDeltas.inputCategory = signatureDelta.inputCategory
+      signatureDeltas.optionalInputCount = signatureDelta.optionalInputCount
+      signatureDeltas.defaultInputCount = signatureDelta.defaultInputCount
+      signatureDeltas.hasOptionalInputs = signatureDelta.hasOptionalInputs
+      signatureDeltas.hasDefaultInputs = signatureDelta.hasDefaultInputs
+      signatureDeltas.asyncBehavior = signatureDelta.asyncBehavior
+      signatureDeltas.outputCategory = signatureDelta.outputCategory
+      summary.push(
+        `Function signature changed inputs ${signatureDelta.inputArity.before} -> ${signatureDelta.inputArity.after}, optional inputs ${signatureDelta.optionalInputCount.before} -> ${signatureDelta.optionalInputCount.after}, default inputs ${signatureDelta.defaultInputCount.before} -> ${signatureDelta.defaultInputCount.after}, async ${signatureDelta.asyncBehavior.before} -> ${signatureDelta.asyncBehavior.after}, output ${signatureDelta.outputCategory.before} -> ${signatureDelta.outputCategory.after}.`,
+      )
+    }
 
     if (structuralDelta === null) {
       summary.push(
@@ -299,6 +321,23 @@ export function createTypeScriptStubChange(
     }
   }
 
+  if (isContractLikeEntity(entity)) {
+    const contractShapeDelta = resolveContractShapeDelta(repoContext, entity)
+
+    if (contractShapeDelta === null) {
+      summary.push(
+        "Skipped signature.memberCount deltas because base/head contract content was unavailable.",
+      )
+    } else {
+      signatureDeltas.memberCount = contractShapeDelta.memberCount
+      signatureDeltas.optionalMemberCount =
+        contractShapeDelta.optionalMemberCount
+      summary.push(
+        `Contract shape changed members ${contractShapeDelta.memberCount.before} -> ${contractShapeDelta.memberCount.after}, optional members ${contractShapeDelta.optionalMemberCount.before} -> ${contractShapeDelta.optionalMemberCount.after}.`,
+      )
+    }
+  }
+
   return {
     id: `change:${entity.id}`,
     entityId: entity.id,
@@ -306,12 +345,34 @@ export function createTypeScriptStubChange(
     summary: `Detected a changed ${entity.kind} at ${entity.modulePath}.`,
     featureDeltas: {
       summary,
-      signature: {},
+      signature: signatureDeltas,
       structural: structuralDeltas,
       behavioral: {},
       topology: topologyDeltas,
     },
   }
+}
+
+interface FunctionSignatureSnapshot {
+  inputArity: number
+  inputCategory: InputCategory
+  optionalInputCount: number
+  defaultInputCount: number
+  hasOptionalInputs: boolean
+  hasDefaultInputs: boolean
+  asyncBehavior: "sync" | "async"
+  outputCategory: OutputCategory
+}
+
+interface FunctionSignatureDelta {
+  inputArity: { before: number; after: number }
+  inputCategory: { before: InputCategory; after: InputCategory }
+  optionalInputCount: { before: number; after: number }
+  defaultInputCount: { before: number; after: number }
+  hasOptionalInputs: { before: boolean; after: boolean }
+  hasDefaultInputs: { before: boolean; after: boolean }
+  asyncBehavior: { before: "sync" | "async"; after: "sync" | "async" }
+  outputCategory: { before: OutputCategory; after: OutputCategory }
 }
 
 interface FunctionStructuralSnapshot {
@@ -326,12 +387,26 @@ interface FunctionStructuralDelta {
   hasTryCatch: { before: boolean; after: boolean }
 }
 
+interface ContractShapeSnapshot {
+  memberCount: number
+  optionalMemberCount: number
+}
+
+interface ContractShapeDelta {
+  memberCount: { before: number; after: number }
+  optionalMemberCount: { before: number; after: number }
+}
+
 function isFunctionLikeEntity(entity: CanonicalEntity): boolean {
   return (
     entity.kind === "function" ||
     entity.kind === "method" ||
     entity.kind === "render_unit"
   )
+}
+
+function isContractLikeEntity(entity: CanonicalEntity): boolean {
+  return entity.kind === "contract" || entity.kind === "type_like_entity"
 }
 
 function createInMemorySourceFile(
@@ -411,6 +486,262 @@ function findFunctionLikeNode(
   }
 
   return null
+}
+
+function findContractLikeNode(
+  sourceFile: SourceFile,
+  entity: CanonicalEntity,
+): Node | null {
+  const interfaceDeclaration = sourceFile
+    .getInterfaces()
+    .find((declaration) => declaration.getName() === entity.name)
+
+  if (interfaceDeclaration !== undefined) {
+    return interfaceDeclaration
+  }
+
+  const typeAliasDeclaration = sourceFile
+    .getTypeAliases()
+    .find((declaration) => declaration.getName() === entity.name)
+
+  if (typeAliasDeclaration !== undefined) {
+    return typeAliasDeclaration
+  }
+
+  const classDeclaration = sourceFile
+    .getClasses()
+    .find((declaration) => declaration.getName() === entity.name)
+
+  if (classDeclaration !== undefined) {
+    return classDeclaration
+  }
+
+  const enumDeclaration = sourceFile
+    .getEnums()
+    .find((declaration) => declaration.getName() === entity.name)
+
+  return enumDeclaration ?? null
+}
+
+function getCallableParameters(
+  callable: Node,
+): import("ts-morph").ParameterDeclaration[] {
+  if (
+    Node.isFunctionDeclaration(callable) ||
+    Node.isMethodDeclaration(callable) ||
+    Node.isFunctionExpression(callable) ||
+    Node.isArrowFunction(callable)
+  ) {
+    return callable.getParameters()
+  }
+
+  return []
+}
+
+function getCallableReturnTypeText(callable: Node): string | null {
+  if (
+    Node.isFunctionDeclaration(callable) ||
+    Node.isMethodDeclaration(callable) ||
+    Node.isFunctionExpression(callable) ||
+    Node.isArrowFunction(callable)
+  ) {
+    return callable.getReturnTypeNode()?.getText() ?? null
+  }
+
+  return null
+}
+
+function getInputCategory(
+  parameters: import("ts-morph").ParameterDeclaration[],
+): InputCategory {
+  if (parameters.length === 0) {
+    return "none"
+  }
+
+  const hasRest = parameters.some((parameter) => parameter.isRestParameter())
+  const hasNamed = parameters.some((parameter) =>
+    Node.isObjectBindingPattern(parameter.getNameNode()),
+  )
+  const hasPositional = parameters.some(
+    (parameter) =>
+      Node.isObjectBindingPattern(parameter.getNameNode()) === false,
+  )
+
+  if (hasRest) {
+    return parameters.length === 1 ? "variadic" : "mixed"
+  }
+
+  if (hasNamed && hasPositional) {
+    return "mixed"
+  }
+
+  return hasNamed ? "named" : "positional"
+}
+
+function getOutputCategory(returnTypeText: string | null): OutputCategory {
+  if (returnTypeText === null || returnTypeText.trim() === "") {
+    return "unknown"
+  }
+
+  const normalized = returnTypeText.trim()
+  const lower = normalized.toLowerCase()
+
+  if (lower === "void" || lower === "undefined" || lower === "never") {
+    return "void"
+  }
+
+  if (lower.startsWith("promise<") || lower === "promise") {
+    return "promise"
+  }
+
+  if (
+    lower.endsWith("[]") ||
+    lower.startsWith("array<") ||
+    lower.startsWith("readonlyarray<")
+  ) {
+    return "collection"
+  }
+
+  if (
+    lower.includes("jsx.element") ||
+    lower.includes("reactnode") ||
+    lower.includes("reactelement")
+  ) {
+    return "renderable"
+  }
+
+  if (
+    lower === "string" ||
+    lower === "number" ||
+    lower === "boolean" ||
+    lower === "bigint" ||
+    lower === "symbol"
+  ) {
+    return "scalar"
+  }
+
+  return "object"
+}
+
+function snapshotFunctionSignature(
+  moduleSourceText: string,
+  modulePath: string,
+  entity: CanonicalEntity,
+): FunctionSignatureSnapshot | null {
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
+  const callable = findFunctionLikeNode(sourceFile, entity)
+
+  if (callable === null) {
+    sourceFile.forget()
+    return null
+  }
+
+  const parameters = getCallableParameters(callable)
+  const optionalInputCount = parameters.filter((parameter) =>
+    parameter.isOptional(),
+  ).length
+  const defaultInputCount = parameters.filter(
+    (parameter) => parameter.getInitializer() !== undefined,
+  ).length
+  const asyncBehavior: FunctionSignatureSnapshot["asyncBehavior"] =
+    Node.isFunctionDeclaration(callable) ||
+    Node.isMethodDeclaration(callable) ||
+    Node.isFunctionExpression(callable) ||
+    Node.isArrowFunction(callable)
+      ? callable.isAsync()
+        ? "async"
+        : "sync"
+      : "sync"
+  const snapshot = {
+    inputArity: parameters.length,
+    inputCategory: getInputCategory(parameters),
+    optionalInputCount,
+    defaultInputCount,
+    hasOptionalInputs: optionalInputCount > 0,
+    hasDefaultInputs: defaultInputCount > 0,
+    asyncBehavior,
+    outputCategory: getOutputCategory(getCallableReturnTypeText(callable)),
+  }
+
+  sourceFile.forget()
+  return snapshot
+}
+
+function resolveFunctionSignatureDelta(
+  repoContext: RepoContext,
+  entity: CanonicalEntity,
+): FunctionSignatureDelta | null {
+  const baseRef = repoContext.resolvedBaseRef
+  const headRef = repoContext.resolvedHeadRef
+
+  if (baseRef === undefined || headRef === undefined) {
+    return null
+  }
+
+  const beforeSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    baseRef,
+    entity.modulePath,
+  )
+  const afterSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    headRef,
+    entity.modulePath,
+  )
+
+  if (beforeSourceText === null || afterSourceText === null) {
+    return null
+  }
+
+  const beforeSnapshot = snapshotFunctionSignature(
+    beforeSourceText,
+    entity.modulePath,
+    entity,
+  )
+  const afterSnapshot = snapshotFunctionSignature(
+    afterSourceText,
+    entity.modulePath,
+    entity,
+  )
+
+  if (beforeSnapshot === null || afterSnapshot === null) {
+    return null
+  }
+
+  return {
+    inputArity: {
+      before: beforeSnapshot.inputArity,
+      after: afterSnapshot.inputArity,
+    },
+    inputCategory: {
+      before: beforeSnapshot.inputCategory,
+      after: afterSnapshot.inputCategory,
+    },
+    optionalInputCount: {
+      before: beforeSnapshot.optionalInputCount,
+      after: afterSnapshot.optionalInputCount,
+    },
+    defaultInputCount: {
+      before: beforeSnapshot.defaultInputCount,
+      after: afterSnapshot.defaultInputCount,
+    },
+    hasOptionalInputs: {
+      before: beforeSnapshot.hasOptionalInputs,
+      after: afterSnapshot.hasOptionalInputs,
+    },
+    hasDefaultInputs: {
+      before: beforeSnapshot.hasDefaultInputs,
+      after: afterSnapshot.hasDefaultInputs,
+    },
+    asyncBehavior: {
+      before: beforeSnapshot.asyncBehavior,
+      after: afterSnapshot.asyncBehavior,
+    },
+    outputCategory: {
+      before: beforeSnapshot.outputCategory,
+      after: afterSnapshot.outputCategory,
+    },
+  }
 }
 
 function isNestedCallableBoundary(root: Node, node: Node): boolean {
@@ -496,6 +827,93 @@ function snapshotFunctionStructure(
   return snapshot
 }
 
+function getContractShape(node: Node): ContractShapeSnapshot | null {
+  if (Node.isInterfaceDeclaration(node)) {
+    const properties = node.getProperties()
+    const methods = node.getMethods()
+    const optionalPropertyCount = properties.filter((property) =>
+      property.hasQuestionToken(),
+    ).length
+    const optionalMethodCount = methods.filter((method) =>
+      method.hasQuestionToken(),
+    ).length
+
+    return {
+      memberCount: properties.length + methods.length,
+      optionalMemberCount: optionalPropertyCount + optionalMethodCount,
+    }
+  }
+
+  if (Node.isClassDeclaration(node)) {
+    const members = node.getMembers()
+
+    return {
+      memberCount: members.length,
+      optionalMemberCount: members.filter((member) => {
+        if (
+          Node.isPropertyDeclaration(member) ||
+          Node.isMethodDeclaration(member)
+        ) {
+          return member.hasQuestionToken()
+        }
+
+        return false
+      }).length,
+    }
+  }
+
+  if (Node.isEnumDeclaration(node)) {
+    return {
+      memberCount: node.getMembers().length,
+      optionalMemberCount: 0,
+    }
+  }
+
+  if (Node.isTypeAliasDeclaration(node)) {
+    const typeNode = node.getTypeNode()
+
+    if (Node.isTypeLiteral(typeNode) === false) {
+      return null
+    }
+
+    const members = typeNode.getMembers()
+    return {
+      memberCount: members.length,
+      optionalMemberCount: members.filter((member) => {
+        if (
+          Node.isPropertySignature(member) ||
+          Node.isMethodSignature(member)
+        ) {
+          return member.hasQuestionToken()
+        }
+
+        return false
+      }).length,
+    }
+  }
+
+  return null
+}
+
+function snapshotContractShape(
+  moduleSourceText: string,
+  modulePath: string,
+  entity: CanonicalEntity,
+): ContractShapeSnapshot | null {
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
+  const contractNode = findContractLikeNode(sourceFile, entity)
+
+  if (contractNode === null) {
+    sourceFile.forget()
+    return null
+  }
+
+  const snapshot = getContractShape(contractNode)
+
+  sourceFile.forget()
+  return snapshot
+}
+
 function resolveFunctionStructuralDelta(
   repoContext: RepoContext,
   entity: CanonicalEntity,
@@ -549,6 +967,59 @@ function resolveFunctionStructuralDelta(
     hasTryCatch: {
       before: beforeSnapshot.hasTryCatch,
       after: afterSnapshot.hasTryCatch,
+    },
+  }
+}
+
+function resolveContractShapeDelta(
+  repoContext: RepoContext,
+  entity: CanonicalEntity,
+): ContractShapeDelta | null {
+  const baseRef = repoContext.resolvedBaseRef
+  const headRef = repoContext.resolvedHeadRef
+
+  if (baseRef === undefined || headRef === undefined) {
+    return null
+  }
+
+  const beforeSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    baseRef,
+    entity.modulePath,
+  )
+  const afterSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    headRef,
+    entity.modulePath,
+  )
+
+  if (beforeSourceText === null || afterSourceText === null) {
+    return null
+  }
+
+  const beforeSnapshot = snapshotContractShape(
+    beforeSourceText,
+    entity.modulePath,
+    entity,
+  )
+  const afterSnapshot = snapshotContractShape(
+    afterSourceText,
+    entity.modulePath,
+    entity,
+  )
+
+  if (beforeSnapshot === null || afterSnapshot === null) {
+    return null
+  }
+
+  return {
+    memberCount: {
+      before: beforeSnapshot.memberCount,
+      after: afterSnapshot.memberCount,
+    },
+    optionalMemberCount: {
+      before: beforeSnapshot.optionalMemberCount,
+      after: afterSnapshot.optionalMemberCount,
     },
   }
 }

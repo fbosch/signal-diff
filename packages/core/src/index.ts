@@ -120,8 +120,12 @@ export interface SignatureFeatures {
   inputArity: number
   inputCategory: InputCategory
   outputCategory: OutputCategory
+  optionalInputCount: number
+  defaultInputCount: number
   hasOptionalInputs: boolean
   hasDefaultInputs: boolean
+  memberCount: number
+  optionalMemberCount: number
   visibility: EntityVisibility
   asyncBehavior: AsyncBehavior
 }
@@ -189,8 +193,12 @@ export interface FeatureDeltaSet {
     inputArity: FeatureDelta<number>
     inputCategory: FeatureDelta<InputCategory>
     outputCategory: FeatureDelta<OutputCategory>
+    optionalInputCount: FeatureDelta<number>
+    defaultInputCount: FeatureDelta<number>
     hasOptionalInputs: FeatureDelta<boolean>
     hasDefaultInputs: FeatureDelta<boolean>
+    memberCount: FeatureDelta<number>
+    optionalMemberCount: FeatureDelta<number>
     visibility: FeatureDelta<EntityVisibility>
     asyncBehavior: FeatureDelta<AsyncBehavior>
   }>
@@ -408,8 +416,12 @@ export function createEmptyCanonicalFeatures(
       inputArity: 0,
       inputCategory: "none",
       outputCategory: "unknown",
+      optionalInputCount: 0,
+      defaultInputCount: 0,
       hasOptionalInputs: false,
       hasDefaultInputs: false,
+      memberCount: 0,
+      optionalMemberCount: 0,
       visibility: "unknown",
       asyncBehavior: "sync",
     },
