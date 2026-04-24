@@ -28,22 +28,18 @@ Benchmark outputs MUST follow a versioned JSON contract that enables comparisons
 ### Requirement: CI enforces drift checks and trend collection
 CI MUST execute benchmark automation for pull requests and scheduled default-branch runs.
 
-#### Scenario: pull request benchmark drift check runs
-- **WHEN** a pull request workflow executes
-- **THEN** CI runs benchmark comparison against baseline and emits pass/warn/fail status
-
-#### Scenario: scheduled benchmark trend run publishes artifacts
-- **WHEN** the scheduled benchmark workflow runs on `master`
-- **THEN** CI publishes benchmark artifacts required for trend tracking
+#### Scenario: scheduled trend run fails on controls mismatch
+- **WHEN** trend aggregation detects multiple control signatures in the configured window
+- **THEN** CI emits an explicit failure signal and exits non-zero for the scheduled trend workflow
 
 ### Requirement: Drift reporting is actionable for maintainers
 The benchmark system MUST provide reporting that helps maintainers identify regressions and improvements quickly.
 
-#### Scenario: report highlights largest drift deltas
-- **WHEN** drift analysis completes
-- **THEN** the report lists top regressed and improved hot paths with relative delta values
+#### Scenario: trend summary reports guardrail status and rationale
+- **WHEN** trend summary generation completes
+- **THEN** the machine-readable summary includes deterministic guardrail status and explanatory messages for runtime/control consistency
 
-#### Scenario: maintainer docs define baseline and incident workflow
-- **WHEN** a maintainer follows benchmark documentation
-- **THEN** they can refresh baselines, tune thresholds, and triage noisy or failing benchmark runs
+#### Scenario: trend summary warns on runtime mismatch
+- **WHEN** trend aggregation detects runtime signature divergence with consistent controls
+- **THEN** CI emits a warning signal while preserving trend output artifacts
 
