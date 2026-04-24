@@ -139,6 +139,35 @@ Actions:
 - include threshold values used in the run
 - link the exact commit SHA and workflow run in issue or PR discussion
 
+## Trend summary operations
+
+Scheduled benchmark trend runs publish:
+
+- `benchmarks/artifacts/benchmark-trend-summary.md`
+- `benchmarks/artifacts/benchmark-trend-summary.json`
+
+Trend summary fields to inspect first:
+
+- `window_size`, `included_runs`, `missing_runs`
+- `runtime_signatures` and `controls_signatures`
+- `top_regressions` and `top_improvements`
+
+Interpretation rules:
+
+- sustained regression: both mean and p95 deltas trend non-negative across the window
+- sustained improvement: both mean and p95 deltas trend non-positive across the window
+- mixed-sign scenarios are excluded from sustained highlight lists
+
+### Troubleshooting partial trend history
+
+If `missing_runs > 0`, the workflow could not collect enough prior artifacts for the configured trend window.
+
+Actions:
+
+1. Verify `BENCHMARK_TREND_WINDOW` is realistic for available historical runs.
+2. Confirm prior scheduled runs completed successfully and uploaded `benchmark-trend-master` artifacts.
+3. Re-run trend workflow manually after next successful scheduled run to fill window depth.
+
 ## Required checks after baseline or threshold changes
 
 ```bash
