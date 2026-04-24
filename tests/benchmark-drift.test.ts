@@ -101,4 +101,15 @@ test("drift markdown includes overall status and scenario rows", () => {
   assert.match(markdown, /Overall status: WARN/)
   assert.match(markdown, /parse-diff-hunks/)
   assert.match(markdown, /\+13\.00%/)
+  assert.match(markdown, /Top regressions/)
+})
+
+test("drift summary includes machine-readable top regressions and improvements", () => {
+  const baseline = createResult(100, 120)
+  const current = createResult(90, 108)
+  const summary = analyzeBenchmarkDrift(baseline, current)
+
+  assert.equal(summary.top_regressions.length, 0)
+  assert.equal(summary.top_improvements.length, 1)
+  assert.equal(summary.top_improvements[0]?.id, "parse-diff-hunks")
 })

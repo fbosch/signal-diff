@@ -26,6 +26,8 @@ export interface DriftSummary {
   overall_status: DriftStatus
   thresholds: DriftThresholds
   scenario_drifts: ScenarioDrift[]
+  top_regressions: ScenarioDrift[]
+  top_improvements: ScenarioDrift[]
   missing_scenarios: string[]
   added_scenarios: string[]
 }
@@ -139,10 +141,15 @@ export function analyzeBenchmarkDrift(
     overallStatus = "fail"
   }
 
+  const regressions = topRegressions(scenarioDrifts)
+  const improvements = topImprovements(scenarioDrifts)
+
   return {
     overall_status: overallStatus,
     thresholds,
     scenario_drifts: scenarioDrifts,
+    top_regressions: regressions,
+    top_improvements: improvements,
     missing_scenarios: missingScenarios,
     added_scenarios: addedScenarios,
   }
@@ -169,6 +176,34 @@ function scenarioStatusEmoji(status: DriftStatus): string {
   return "PASS"
 }
 
+function topRegressions(scenarioDrifts: ScenarioDrift[]): ScenarioDrift[] {
+  return [...scenarioDrifts]
+    .filter(
+      (scenario) =>
+        Math.max(scenario.mean_delta_percent, scenario.p95_delta_percent) > 0,
+    )
+    .sort(
+      (left, right) =>
+        Math.max(right.mean_delta_percent, right.p95_delta_percent) -
+        Math.max(left.mean_delta_percent, left.p95_delta_percent),
+    )
+    .slice(0, 3)
+}
+
+function topImprovements(scenarioDrifts: ScenarioDrift[]): ScenarioDrift[] {
+  return [...scenarioDrifts]
+    .filter(
+      (scenario) =>
+        Math.min(scenario.mean_delta_percent, scenario.p95_delta_percent) < 0,
+    )
+    .sort(
+      (left, right) =>
+        Math.min(left.mean_delta_percent, left.p95_delta_percent) -
+        Math.min(right.mean_delta_percent, right.p95_delta_percent),
+    )
+    .slice(0, 3)
+}
+
 export function renderDriftMarkdown(summary: DriftSummary): string {
   const lines: string[] = [
     "## Benchmark Drift Summary",
@@ -184,6 +219,30 @@ export function renderDriftMarkdown(summary: DriftSummary): string {
     lines.push(
       `${drift.id} | ${formatPercent(drift.mean_delta_percent)} | ${formatPercent(drift.p95_delta_percent)} | ${scenarioStatusEmoji(drift.status)}`,
     )
+  }
+
+  if (summary.top_regressions.length > 0) {
+    lines.push("", "Top regressions")
+
+    for (const regression of summary.top_regressions) {
+      const worst = Math.max(
+        regression.mean_delta_percent,
+        regression.p95_delta_percent,
+      )
+      lines.push(`- ${regression.id}: ${formatPercent(worst)}`)
+    }
+  }
+
+  if (summary.top_improvements.length > 0) {
+    lines.push("", "Top improvements")
+
+    for (const improvement of summary.top_improvements) {
+      const best = Math.min(
+        improvement.mean_delta_percent,
+        improvement.p95_delta_percent,
+      )
+      lines.push(`- ${improvement.id}: ${formatPercent(best)}`)
+    }
   }
 
   if (summary.missing_scenarios.length > 0) {

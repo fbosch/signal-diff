@@ -18,7 +18,7 @@
 
 ## 4. Reporting And Documentation
 
-- [ ] 4.1 Add drift reporting outputs (machine-readable and human-readable).
+- [x] 4.1 Add drift reporting outputs (machine-readable and human-readable).
 - [ ] 4.2 Add maintainer runbook for baseline refresh and threshold tuning.
 - [ ] 4.3 Add troubleshooting guidance for benchmark noise and CI environment variance.
 
