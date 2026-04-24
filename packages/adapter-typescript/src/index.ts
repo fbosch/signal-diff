@@ -261,6 +261,7 @@ export function createTypeScriptStubChange(
   repoContext: RepoContext,
 ): EntityChange {
   const summary = [`Detected a changed ${entity.kind} at ${entity.modulePath}.`]
+  const structuralDeltas: EntityChange["featureDeltas"]["structural"] = {}
   const topologyDeltas: EntityChange["featureDeltas"]["topology"] = {}
 
   if (entity.kind === "module") {
@@ -281,6 +282,23 @@ export function createTypeScriptStubChange(
     }
   }
 
+  if (isFunctionLikeEntity(entity)) {
+    const structuralDelta = resolveFunctionStructuralDelta(repoContext, entity)
+
+    if (structuralDelta === null) {
+      summary.push(
+        "Skipped structural feature deltas because base/head callable content was unavailable.",
+      )
+    } else {
+      structuralDeltas.branchCount = structuralDelta.branchCount
+      structuralDeltas.helperCallCount = structuralDelta.helperCallCount
+      structuralDeltas.hasTryCatch = structuralDelta.hasTryCatch
+      summary.push(
+        `Function structure changed branches ${structuralDelta.branchCount.before} -> ${structuralDelta.branchCount.after}, helper calls ${structuralDelta.helperCallCount.before} -> ${structuralDelta.helperCallCount.after}, try/catch ${String(structuralDelta.hasTryCatch.before)} -> ${String(structuralDelta.hasTryCatch.after)}.`,
+      )
+    }
+  }
+
   return {
     id: `change:${entity.id}`,
     entityId: entity.id,
@@ -289,9 +307,248 @@ export function createTypeScriptStubChange(
     featureDeltas: {
       summary,
       signature: {},
-      structural: {},
+      structural: structuralDeltas,
       behavioral: {},
       topology: topologyDeltas,
+    },
+  }
+}
+
+interface FunctionStructuralSnapshot {
+  branchCount: number
+  helperCallCount: number
+  hasTryCatch: boolean
+}
+
+interface FunctionStructuralDelta {
+  branchCount: { before: number; after: number }
+  helperCallCount: { before: number; after: number }
+  hasTryCatch: { before: boolean; after: boolean }
+}
+
+function isFunctionLikeEntity(entity: CanonicalEntity): boolean {
+  return (
+    entity.kind === "function" ||
+    entity.kind === "method" ||
+    entity.kind === "render_unit"
+  )
+}
+
+function createInMemorySourceFile(
+  moduleSourceText: string,
+  modulePath: string,
+): SourceFile {
+  const project = new Project({
+    useInMemoryFileSystem: true,
+    skipAddingFilesFromTsConfig: true,
+    skipFileDependencyResolution: true,
+  })
+  const extension = path.extname(modulePath).toLowerCase()
+  const sourceExtension = TYPESCRIPT_SOURCE_EXTENSIONS.has(extension)
+    ? extension
+    : ".ts"
+
+  return project.createSourceFile(
+    `module${sourceExtension}`,
+    moduleSourceText,
+    {
+      overwrite: true,
+    },
+  )
+}
+
+function hasCallableBody(node: Node): boolean {
+  if (
+    Node.isFunctionDeclaration(node) ||
+    Node.isMethodDeclaration(node) ||
+    Node.isFunctionExpression(node) ||
+    Node.isArrowFunction(node)
+  ) {
+    return node.getBody() !== undefined
+  }
+
+  return false
+}
+
+function findFunctionLikeNode(
+  sourceFile: SourceFile,
+  entity: CanonicalEntity,
+): Node | null {
+  if (entity.kind === "method") {
+    const methods = sourceFile
+      .getDescendantsOfKind(SyntaxKind.MethodDeclaration)
+      .filter((method) => method.getName() === entity.name)
+
+    return methods.find(hasCallableBody) ?? methods[0] ?? null
+  }
+
+  const functionDeclarations = sourceFile
+    .getFunctions()
+    .filter((declaration) => declaration.getName() === entity.name)
+
+  if (functionDeclarations.length > 0) {
+    return (
+      functionDeclarations.find(hasCallableBody) ??
+      functionDeclarations[0] ??
+      null
+    )
+  }
+
+  for (const declaration of sourceFile.getVariableDeclarations()) {
+    if (declaration.getName() !== entity.name) {
+      continue
+    }
+
+    const initializer = declaration.getInitializer()
+
+    if (
+      initializer !== undefined &&
+      (Node.isArrowFunction(initializer) ||
+        Node.isFunctionExpression(initializer))
+    ) {
+      return initializer
+    }
+  }
+
+  return null
+}
+
+function isNestedCallableBoundary(root: Node, node: Node): boolean {
+  return (
+    node !== root &&
+    (Node.isFunctionDeclaration(node) ||
+      Node.isArrowFunction(node) ||
+      Node.isFunctionExpression(node) ||
+      Node.isMethodDeclaration(node))
+  )
+}
+
+function countScopedDescendants(
+  callable: Node,
+  predicate: (node: Node) => boolean,
+): number {
+  let count = 0
+
+  callable.forEachDescendant((node, traversal) => {
+    if (isNestedCallableBoundary(callable, node)) {
+      traversal.skip()
+      return
+    }
+
+    if (predicate(node)) {
+      count += 1
+    }
+  })
+
+  return count
+}
+
+function isBranchNode(node: Node): boolean {
+  return (
+    Node.isIfStatement(node) ||
+    Node.isConditionalExpression(node) ||
+    Node.isSwitchStatement(node) ||
+    Node.isForStatement(node) ||
+    Node.isForInStatement(node) ||
+    Node.isForOfStatement(node) ||
+    Node.isWhileStatement(node) ||
+    Node.isDoStatement(node)
+  )
+}
+
+function countBranches(callable: Node): number {
+  return countScopedDescendants(callable, isBranchNode)
+}
+
+function countHelperCalls(callable: Node): number {
+  return countScopedDescendants(
+    callable,
+    (node) =>
+      Node.isCallExpression(node) &&
+      node.getExpression().getText() !== "import",
+  )
+}
+
+function hasTryCatch(callable: Node): boolean {
+  return countScopedDescendants(callable, Node.isTryStatement) > 0
+}
+
+function snapshotFunctionStructure(
+  moduleSourceText: string,
+  modulePath: string,
+  entity: CanonicalEntity,
+): FunctionStructuralSnapshot | null {
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
+  const callable = findFunctionLikeNode(sourceFile, entity)
+
+  if (callable === null) {
+    sourceFile.forget()
+    return null
+  }
+
+  const snapshot = {
+    branchCount: countBranches(callable),
+    helperCallCount: countHelperCalls(callable),
+    hasTryCatch: hasTryCatch(callable),
+  }
+
+  sourceFile.forget()
+  return snapshot
+}
+
+function resolveFunctionStructuralDelta(
+  repoContext: RepoContext,
+  entity: CanonicalEntity,
+): FunctionStructuralDelta | null {
+  const baseRef = repoContext.resolvedBaseRef
+  const headRef = repoContext.resolvedHeadRef
+
+  if (baseRef === undefined || headRef === undefined) {
+    return null
+  }
+
+  const beforeSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    baseRef,
+    entity.modulePath,
+  )
+  const afterSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    headRef,
+    entity.modulePath,
+  )
+
+  if (beforeSourceText === null || afterSourceText === null) {
+    return null
+  }
+
+  const beforeSnapshot = snapshotFunctionStructure(
+    beforeSourceText,
+    entity.modulePath,
+    entity,
+  )
+  const afterSnapshot = snapshotFunctionStructure(
+    afterSourceText,
+    entity.modulePath,
+    entity,
+  )
+
+  if (beforeSnapshot === null || afterSnapshot === null) {
+    return null
+  }
+
+  return {
+    branchCount: {
+      before: beforeSnapshot.branchCount,
+      after: afterSnapshot.branchCount,
+    },
+    helperCallCount: {
+      before: beforeSnapshot.helperCallCount,
+      after: afterSnapshot.helperCallCount,
+    },
+    hasTryCatch: {
+      before: beforeSnapshot.hasTryCatch,
+      after: afterSnapshot.hasTryCatch,
     },
   }
 }
@@ -312,15 +569,11 @@ function readFileAtGitRef(
   }
 }
 
-function countModuleImportFanOut(moduleSourceText: string): number {
-  const project = new Project({
-    useInMemoryFileSystem: true,
-    skipAddingFilesFromTsConfig: true,
-    skipFileDependencyResolution: true,
-  })
-  const sourceFile = project.createSourceFile("module.ts", moduleSourceText, {
-    overwrite: true,
-  })
+function countModuleImportFanOut(
+  moduleSourceText: string,
+  modulePath: string,
+): number {
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
   const staticImportCount = sourceFile.getImportDeclarations().length
   const exportFromCount = sourceFile
     .getExportDeclarations()
@@ -367,8 +620,8 @@ function resolveModuleImportFanOutDelta(
   }
 
   return {
-    before: countModuleImportFanOut(beforeSourceText),
-    after: countModuleImportFanOut(afterSourceText),
+    before: countModuleImportFanOut(beforeSourceText, modulePath),
+    after: countModuleImportFanOut(afterSourceText, modulePath),
   }
 }
 

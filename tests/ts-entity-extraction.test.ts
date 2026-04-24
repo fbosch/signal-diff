@@ -90,6 +90,9 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
+      "  if (value > 0) {",
+      "    return Math.abs(value) + 1",
+      "  }",
       "  return value + 1",
       "}",
       "",
@@ -131,6 +134,9 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
+      "  if (value > 0) {",
+      "    return Math.abs(value) + 2",
+      "  }",
       "  return value + 2",
       "}",
       "",
@@ -177,7 +183,17 @@ function createEntityFixtureRepo(): {
       "}",
       "",
       "export function helper(value: number): number {",
-      "  return value + 3",
+      "  try {",
+      "    if (value > 0) {",
+      "      return Math.max(value, 1) + 3",
+      "    }",
+      "    if (value === 0) {",
+      '      return Number.parseInt("0", 10)',
+      "    }",
+      "    return value + 3",
+      "  } catch {",
+      "    return 0",
+      "  }",
       "}",
       "",
       "export const add = (a: number, b: number): number => a + b",
@@ -405,6 +421,325 @@ test("typescript extraction reports explicit fallback when module delta unavaila
     assert.equal(
       addedModuleChange?.featureDeltas.summary.includes(
         "Skipped topology.importFanOut delta because base/head module content was unavailable.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction computes function structural deltas from base/head", () => {
+  const { repoRoot, baseRef, headRef } = createEntityFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const helperEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "helper",
+    )
+
+    assert.equal(helperEntity !== undefined, true)
+
+    const helperChange = extraction.changes.find(
+      (change) => change.entityId === helperEntity?.id,
+    )
+
+    assert.equal(helperChange !== undefined, true)
+    assert.deepEqual(helperChange?.featureDeltas.structural.branchCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(helperChange?.featureDeltas.structural.helperCallCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(helperChange?.featureDeltas.structural.hasTryCatch, {
+      before: false,
+      after: true,
+    })
+    assert.equal(
+      helperChange?.featureDeltas.summary.includes(
+        "Function structure changed branches 1 -> 2, helper calls 1 -> 2, try/catch false -> true.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction parses structural snapshots with matching TypeScript extension", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/generic.ts",
+      "export const identity = <T>(value: T): T => value",
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add generic arrow"])
+    const genericBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/generic.ts",
+      [
+        "export const identity = <T>(value: T): T => {",
+        "  if (value === undefined) {",
+        "    return value",
+        "  }",
+        "  return value",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change generic arrow"])
+    const genericHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: genericBaseRef,
+      headRef: genericHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const identityEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "identity",
+    )
+
+    assert.equal(identityEntity !== undefined, true)
+
+    const identityChange = extraction.changes.find(
+      (change) => change.entityId === identityEntity?.id,
+    )
+
+    assert.deepEqual(identityChange?.featureDeltas.structural.branchCount, {
+      before: 0,
+      after: 1,
+    })
+    assert.equal(
+      identityChange?.featureDeltas.summary.includes(
+        "Skipped structural feature deltas",
+      ),
+      false,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction resolves overloaded functions to implementation nodes", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/overload.ts",
+      [
+        "export function parse(value: string): string",
+        "export function parse(value: number): string",
+        "export function parse(value: string | number): string {",
+        "  return String(value)",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add overload"])
+    const overloadBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/overload.ts",
+      [
+        "export function parse(value: string): string",
+        "export function parse(value: number): string",
+        "export function parse(value: string | number): string {",
+        '  if (typeof value === "number") {',
+        "    return String(value)",
+        "  }",
+        "  return value",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change overload"])
+    const overloadHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: overloadBaseRef,
+      headRef: overloadHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const parseChange = extraction.changes.find(
+      (change) =>
+        change.featureDeltas.structural.branchCount?.before === 0 &&
+        change.featureDeltas.structural.branchCount.after === 1,
+    )
+
+    assert.equal(parseChange !== undefined, true)
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction excludes nested callable bodies from structural metrics", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/nested.ts",
+      [
+        "export function outer(value: number): number {",
+        "  const nested = () => {",
+        "    if (value > 0) {",
+        "      return Math.abs(value)",
+        "    }",
+        "    try {",
+        "      return value",
+        "    } catch {",
+        "      return 0",
+        "    }",
+        "  }",
+        "  return nested()",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add nested callable"])
+    const nestedBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/nested.ts",
+      [
+        "export function outer(value: number): number {",
+        "  const nested = () => {",
+        "    if (value > 0) {",
+        "      return Math.abs(value)",
+        "    }",
+        "    try {",
+        "      return value",
+        "    } catch {",
+        "      return 0",
+        "    }",
+        "  }",
+        "  if (value === 0) {",
+        "    return nested()",
+        "  }",
+        "  return Number.parseInt(String(value), 10)",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change outer callable"])
+    const nestedHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: nestedBaseRef,
+      headRef: nestedHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const outerEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "outer",
+    )
+
+    assert.equal(outerEntity !== undefined, true)
+
+    const outerChange = extraction.changes.find(
+      (change) => change.entityId === outerEntity?.id,
+    )
+
+    assert.deepEqual(outerChange?.featureDeltas.structural.branchCount, {
+      before: 0,
+      after: 1,
+    })
+    assert.deepEqual(outerChange?.featureDeltas.structural.helperCallCount, {
+      before: 1,
+      after: 3,
+    })
+    assert.deepEqual(outerChange?.featureDeltas.structural.hasTryCatch, {
+      before: false,
+      after: false,
+    })
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction reports explicit fallback when function structural delta unavailable", () => {
+  const { repoRoot, headRef } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/new-function.ts",
+      [
+        "export function fresh(value: number): number {",
+        "  if (value > 0) {",
+        "    return Math.abs(value)",
+        "  }",
+        "  return value",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add function"])
+    const newHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: headRef,
+      headRef: newHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const freshEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "fresh",
+    )
+
+    assert.equal(freshEntity !== undefined, true)
+
+    const freshChange = extraction.changes.find(
+      (change) => change.entityId === freshEntity?.id,
+    )
+
+    assert.equal(freshChange !== undefined, true)
+    assert.equal(freshChange?.featureDeltas.structural.branchCount, undefined)
+    assert.equal(
+      freshChange?.featureDeltas.summary.includes(
+        "Skipped structural feature deltas because base/head callable content was unavailable.",
       ),
       true,
     )
