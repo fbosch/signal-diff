@@ -27,3 +27,15 @@ pnpm test
 pnpm typecheck
 pnpm verify
 ```
+
+## Output examples (no extra package scripts)
+
+Run synthetic review JSON output profiles directly:
+
+```bash
+pnpm tsx scripts/output-examples.ts
+pnpm tsx scripts/output-examples.ts --json
+pnpm tsx scripts/output-examples.ts --profile=small --json
+pnpm tsx scripts/output-examples.ts --profile=medium --json
+pnpm tsx scripts/output-examples.ts --profile=large --json
+```
