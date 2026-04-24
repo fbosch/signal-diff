@@ -47,11 +47,19 @@ jobs:
       - name: Publish benchmark summary
         if: always()
         run: |
+          if [ ! -f benchmarks/artifacts/benchmark-drift-summary.md ]; then
+            echo "::warning::benchmark-drift-summary.md not found; compare step likely failed earlier."
+            exit 0
+          fi
           cat benchmarks/artifacts/benchmark-drift-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Emit drift status signal
         if: always()
         run: |
+          if [ ! -f benchmarks/artifacts/benchmark-drift-summary.json ]; then
+            echo "::warning::benchmark-drift-summary.json not found; skipping drift status emission."
+            exit 0
+          fi
           status=$(node -e "const fs=require('node:fs'); const report=JSON.parse(fs.readFileSync('benchmarks/artifacts/benchmark-drift-summary.json','utf8')); process.stdout.write(report.overall_status)")
           echo "Benchmark drift status: ${status}"
           if [ "$status" = "warn" ]; then
@@ -68,3 +76,4 @@ jobs:
         with:
           name: benchmark-pr-drift
           path: benchmarks/artifacts/*
+          if-no-files-found: ignore
