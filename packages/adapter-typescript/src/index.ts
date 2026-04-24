@@ -492,12 +492,16 @@ function findContractLikeNode(
   sourceFile: SourceFile,
   entity: CanonicalEntity,
 ): Node | null {
-  const interfaceDeclaration = sourceFile
-    .getInterfaces()
-    .find((declaration) => declaration.getName() === entity.name)
+  if (entity.kind === "contract") {
+    return (
+      sourceFile
+        .getInterfaces()
+        .find((declaration) => declaration.getName() === entity.name) ?? null
+    )
+  }
 
-  if (interfaceDeclaration !== undefined) {
-    return interfaceDeclaration
+  if (entity.kind !== "type_like_entity") {
+    return null
   }
 
   const typeAliasDeclaration = sourceFile
@@ -829,18 +833,20 @@ function snapshotFunctionStructure(
 
 function getContractShape(node: Node): ContractShapeSnapshot | null {
   if (Node.isInterfaceDeclaration(node)) {
-    const properties = node.getProperties()
-    const methods = node.getMethods()
-    const optionalPropertyCount = properties.filter((property) =>
-      property.hasQuestionToken(),
-    ).length
-    const optionalMethodCount = methods.filter((method) =>
-      method.hasQuestionToken(),
-    ).length
+    const members = node.getMembers()
 
     return {
-      memberCount: properties.length + methods.length,
-      optionalMemberCount: optionalPropertyCount + optionalMethodCount,
+      memberCount: members.length,
+      optionalMemberCount: members.filter((member) => {
+        if (
+          Node.isPropertySignature(member) ||
+          Node.isMethodSignature(member)
+        ) {
+          return member.hasQuestionToken()
+        }
+
+        return false
+      }).length,
     }
   }
 
