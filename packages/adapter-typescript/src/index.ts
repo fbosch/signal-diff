@@ -313,21 +313,31 @@ function readFileAtGitRef(
 }
 
 function countModuleImportFanOut(moduleSourceText: string): number {
-  const importFromMatches =
-    moduleSourceText.match(/^\s*import\s+.+\s+from\s+["'][^"']+["']/gm) ?? []
-  const sideEffectImportMatches =
-    moduleSourceText.match(/^\s*import\s+["'][^"']+["']/gm) ?? []
-  const exportFromMatches =
-    moduleSourceText.match(/^\s*export\s+.+\s+from\s+["'][^"']+["']/gm) ?? []
-  const dynamicImportMatches =
-    moduleSourceText.match(/\bimport\s*\(\s*["'][^"']+["']\s*\)/g) ?? []
+  const project = new Project({
+    useInMemoryFileSystem: true,
+    skipAddingFilesFromTsConfig: true,
+    skipFileDependencyResolution: true,
+  })
+  const sourceFile = project.createSourceFile("module.ts", moduleSourceText, {
+    overwrite: true,
+  })
+  const staticImportCount = sourceFile.getImportDeclarations().length
+  const exportFromCount = sourceFile
+    .getExportDeclarations()
+    .filter(
+      (declaration) => declaration.getModuleSpecifierValue() !== undefined,
+    ).length
+  const dynamicImportCount = sourceFile
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .filter((expression) => expression.getExpression().getText() === "import")
+    .filter((expression) => {
+      const firstArgument = expression.getArguments()[0]
+      return firstArgument !== undefined && Node.isStringLiteral(firstArgument)
+    }).length
 
-  return (
-    importFromMatches.length +
-    sideEffectImportMatches.length +
-    exportFromMatches.length +
-    dynamicImportMatches.length
-  )
+  sourceFile.forget()
+
+  return staticImportCount + exportFromCount + dynamicImportCount
 }
 
 function resolveModuleImportFanOutDelta(

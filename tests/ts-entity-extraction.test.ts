@@ -158,7 +158,9 @@ function createEntityFixtureRepo(): {
     [
       'import { readFileSync } from "node:fs"',
       'import path from "node:path"',
-      'import { fileURLToPath } from "node:url"',
+      "import {",
+      "  fileURLToPath,",
+      '} from "node:url"',
       "export interface UserContract {",
       "  id: string",
       "}",
