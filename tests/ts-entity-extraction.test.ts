@@ -478,6 +478,313 @@ test("typescript extraction computes function structural deltas from base/head",
   }
 })
 
+test("typescript extraction computes callable signature deltas from base/head", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/signature.ts",
+      [
+        'export async function loadUser(id: string, fallback = "guest"): Promise<string> {',
+        "  return id || fallback",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add signature fixture"])
+    const signatureBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/signature.ts",
+      [
+        'export function loadUser(id: string, fallback = "guest", mode?: "fast"): string {',
+        "  return mode === undefined ? id || fallback : id",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change signature fixture"])
+    const signatureHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: signatureBaseRef,
+      headRef: signatureHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const loadUserEntity = extraction.entities.find(
+      (entity) => entity.kind === "function" && entity.name === "loadUser",
+    )
+
+    assert.equal(loadUserEntity !== undefined, true)
+
+    const loadUserChange = extraction.changes.find(
+      (change) => change.entityId === loadUserEntity?.id,
+    )
+
+    assert.deepEqual(loadUserChange?.featureDeltas.signature.inputArity, {
+      before: 2,
+      after: 3,
+    })
+    assert.deepEqual(
+      loadUserChange?.featureDeltas.signature.optionalInputCount,
+      {
+        before: 1,
+        after: 2,
+      },
+    )
+    assert.deepEqual(
+      loadUserChange?.featureDeltas.signature.defaultInputCount,
+      {
+        before: 1,
+        after: 1,
+      },
+    )
+    assert.deepEqual(loadUserChange?.featureDeltas.signature.asyncBehavior, {
+      before: "async",
+      after: "sync",
+    })
+    assert.deepEqual(loadUserChange?.featureDeltas.signature.outputCategory, {
+      before: "promise",
+      after: "scalar",
+    })
+    assert.equal(
+      loadUserChange?.featureDeltas.summary.includes(
+        "Function signature changed inputs 2 -> 3, optional inputs 1 -> 2, default inputs 1 -> 1, async async -> sync, output promise -> scalar.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction computes contract shape deltas from base/head", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/contract.ts",
+      ["export interface Account {", "  id: string", "}"].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add contract fixture"])
+    const contractBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/contract.ts",
+      [
+        "export interface Account {",
+        "  id: string",
+        "  displayName?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change contract fixture"])
+    const contractHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: contractBaseRef,
+      headRef: contractHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const accountEntity = extraction.entities.find(
+      (entity) => entity.kind === "contract" && entity.name === "Account",
+    )
+
+    assert.equal(accountEntity !== undefined, true)
+
+    const accountChange = extraction.changes.find(
+      (change) => change.entityId === accountEntity?.id,
+    )
+
+    assert.deepEqual(accountChange?.featureDeltas.signature.memberCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(
+      accountChange?.featureDeltas.signature.optionalMemberCount,
+      {
+        before: 0,
+        after: 1,
+      },
+    )
+    assert.equal(
+      accountChange?.featureDeltas.summary.includes(
+        "Contract shape changed members 1 -> 2, optional members 0 -> 1.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction counts all interface members in contract shape deltas", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/callable-contract.ts",
+      [
+        "export interface CallableContract {",
+        "  (id: string): string",
+        "  value?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add callable contract"])
+    const contractBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/callable-contract.ts",
+      [
+        "export interface CallableContract {",
+        "  (id: string): string",
+        "  new (id: string): Date",
+        "  [key: string]: string | Date",
+        "  value?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change callable contract"])
+    const contractHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: contractBaseRef,
+      headRef: contractHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const contractEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "contract" && entity.name === "CallableContract",
+    )
+
+    assert.equal(contractEntity !== undefined, true)
+
+    const contractChange = extraction.changes.find(
+      (change) => change.entityId === contractEntity?.id,
+    )
+
+    assert.deepEqual(contractChange?.featureDeltas.signature.memberCount, {
+      before: 2,
+      after: 4,
+    })
+    assert.deepEqual(
+      contractChange?.featureDeltas.signature.optionalMemberCount,
+      {
+        before: 1,
+        after: 1,
+      },
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction matches contract shape nodes by entity kind before name", () => {
+  const { repoRoot } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/merged.ts",
+      [
+        "export interface Merged {",
+        "  id: string",
+        "}",
+        "",
+        "export class Merged {",
+        "  value = 1",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add merged declarations"])
+    const mergedBaseRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    writeFile(
+      repoRoot,
+      "packages/app/src/merged.ts",
+      [
+        "export interface Merged {",
+        "  id: string",
+        "}",
+        "",
+        "export class Merged {",
+        "  value = 1",
+        "  label?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "change merged class"])
+    const mergedHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: mergedBaseRef,
+      headRef: mergedHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const mergedClassEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "type_like_entity" && entity.name === "Merged",
+    )
+
+    assert.equal(mergedClassEntity !== undefined, true)
+
+    const mergedClassChange = extraction.changes.find(
+      (change) => change.entityId === mergedClassEntity?.id,
+    )
+
+    assert.deepEqual(mergedClassChange?.featureDeltas.signature.memberCount, {
+      before: 1,
+      after: 2,
+    })
+    assert.deepEqual(
+      mergedClassChange?.featureDeltas.signature.optionalMemberCount,
+      {
+        before: 0,
+        after: 1,
+      },
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
 test("typescript extraction parses structural snapshots with matching TypeScript extension", () => {
   const { repoRoot } = createEntityFixtureRepo()
 
@@ -736,10 +1043,72 @@ test("typescript extraction reports explicit fallback when function structural d
     )
 
     assert.equal(freshChange !== undefined, true)
+    assert.equal(freshChange?.featureDeltas.signature.inputArity, undefined)
     assert.equal(freshChange?.featureDeltas.structural.branchCount, undefined)
     assert.equal(
       freshChange?.featureDeltas.summary.includes(
+        "Skipped signature feature deltas because base/head callable content was unavailable.",
+      ),
+      true,
+    )
+    assert.equal(
+      freshChange?.featureDeltas.summary.includes(
         "Skipped structural feature deltas because base/head callable content was unavailable.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction reports explicit fallback when contract shape delta unavailable", () => {
+  const { repoRoot, headRef } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/new-contract.ts",
+      [
+        "export interface FreshContract {",
+        "  id: string",
+        "  label?: string",
+        "}",
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add contract"])
+    const newHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: headRef,
+      headRef: newHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const freshContractEntity = extraction.entities.find(
+      (entity) => entity.kind === "contract" && entity.name === "FreshContract",
+    )
+
+    assert.equal(freshContractEntity !== undefined, true)
+
+    const freshContractChange = extraction.changes.find(
+      (change) => change.entityId === freshContractEntity?.id,
+    )
+
+    assert.equal(freshContractChange !== undefined, true)
+    assert.equal(
+      freshContractChange?.featureDeltas.signature.memberCount,
+      undefined,
+    )
+    assert.equal(
+      freshContractChange?.featureDeltas.summary.includes(
+        "Skipped signature.memberCount deltas because base/head contract content was unavailable.",
       ),
       true,
     )
