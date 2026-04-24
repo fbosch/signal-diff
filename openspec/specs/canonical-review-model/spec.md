@@ -29,6 +29,10 @@ The system MUST define normalized feature, change, and finding contracts that co
 - **WHEN** the core contracts are defined for v1
 - **THEN** they include public contract drift, behavior shift, peer divergence, likely pattern change, likely new abstraction, boundary anomaly, likely incomplete companion change, and elevated review priority
 
+#### Scenario: Phase 3 extraction computes function structural deltas
+- **WHEN** a changed function-like entity is extracted and comparable base/head callable content is available
+- **THEN** canonical change output includes `structural.branchCount`, `structural.helperCallCount`, and `structural.hasTryCatch` feature deltas
+
 ### Requirement: Evidence-backed review surface contracts
 The system MUST model findings with structured evidence so reviewers can drill down from conceptual findings to supporting entities, feature deltas, peer anchors, companion candidates, and diff hunks.
 
@@ -40,6 +44,10 @@ The system MUST model findings with structured evidence so reviewers can drill d
 - **WHEN** the core review surface is represented
 - **THEN** it separates conceptual overview, finding detail, supporting evidence, and raw diff references
 
+#### Scenario: structural delta extraction fails loud with explicit fallback
+- **WHEN** a changed function-like entity cannot be matched in both base and head source snapshots
+- **THEN** canonical change output includes an explicit fallback summary instead of silently emitting zero deltas
+
 ### Requirement: Package boundaries preserve language-agnostic core
 The system MUST define package boundary rules that allow language adapters to depend on core contracts without allowing TypeScript-specific types or compiler shapes to flow back into `packages/core`.
 
@@ -50,4 +58,3 @@ The system MUST define package boundary rules that allow language adapters to de
 #### Scenario: package dependency direction is explicit
 - **WHEN** package interfaces are defined
 - **THEN** dependency direction is explicit such that `core` is independent, adapters and heuristics depend on `core`, and CLI performs orchestration across packages
-
