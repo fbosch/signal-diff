@@ -9,6 +9,7 @@ import {
   analyzeBenchmarkDrift,
   DEFAULT_DRIFT_THRESHOLDS,
   type DriftSummary,
+  type DriftThresholds,
   renderDriftMarkdown,
 } from "./drift.ts"
 
@@ -48,6 +49,59 @@ interface CompareControls {
   currentPath: string
   summaryPath: string
   outputPath: string
+  thresholds: DriftThresholds
+}
+
+function parseThresholdValue(rawValue: string, flagName: string): number {
+  const value = Number(rawValue)
+
+  if (Number.isFinite(value) === false || value < 0) {
+    throw new Error(
+      `${flagName} must be a number greater than or equal to 0. Received '${rawValue}'.`,
+    )
+  }
+
+  return value
+}
+
+function resolveDriftThresholds(
+  warnPercent: number,
+  failPercent: number,
+): DriftThresholds {
+  if (failPercent < warnPercent) {
+    throw new Error(
+      `--fail-threshold must be greater than or equal to --warn-threshold. Received warn=${warnPercent}, fail=${failPercent}.`,
+    )
+  }
+
+  return {
+    warn_percent: warnPercent,
+    fail_percent: failPercent,
+  }
+}
+
+export function parseDriftThresholdsFromArgs(argv: string[]): DriftThresholds {
+  let warnPercent = DEFAULT_DRIFT_THRESHOLDS.warn_percent
+  let failPercent = DEFAULT_DRIFT_THRESHOLDS.fail_percent
+
+  for (const argument of argv) {
+    if (argument.startsWith("--warn-threshold=")) {
+      warnPercent = parseThresholdValue(
+        argument.slice("--warn-threshold=".length),
+        "--warn-threshold",
+      )
+      continue
+    }
+
+    if (argument.startsWith("--fail-threshold=")) {
+      failPercent = parseThresholdValue(
+        argument.slice("--fail-threshold=".length),
+        "--fail-threshold",
+      )
+    }
+  }
+
+  return resolveDriftThresholds(warnPercent, failPercent)
 }
 
 function parseControls(argv: string[]): CompareControls {
@@ -55,6 +109,8 @@ function parseControls(argv: string[]): CompareControls {
   let currentPath = ""
   let summaryPath = ""
   let outputPath = ""
+  let warnPercent = DEFAULT_DRIFT_THRESHOLDS.warn_percent
+  let failPercent = DEFAULT_DRIFT_THRESHOLDS.fail_percent
 
   for (const argument of argv) {
     if (argument.startsWith("--baseline=")) {
@@ -74,6 +130,22 @@ function parseControls(argv: string[]): CompareControls {
 
     if (argument.startsWith("--output=")) {
       outputPath = argument.slice("--output=".length)
+      continue
+    }
+
+    if (argument.startsWith("--warn-threshold=")) {
+      warnPercent = parseThresholdValue(
+        argument.slice("--warn-threshold=".length),
+        "--warn-threshold",
+      )
+      continue
+    }
+
+    if (argument.startsWith("--fail-threshold=")) {
+      failPercent = parseThresholdValue(
+        argument.slice("--fail-threshold=".length),
+        "--fail-threshold",
+      )
       continue
     }
 
@@ -101,6 +173,7 @@ function parseControls(argv: string[]): CompareControls {
     currentPath,
     summaryPath,
     outputPath,
+    thresholds: resolveDriftThresholds(warnPercent, failPercent),
   }
 }
 
@@ -136,11 +209,7 @@ export function runCompareCli(): void {
   const baseline = readBenchmarkResults(controls.baselinePath)
   const current = readBenchmarkResults(controls.currentPath)
   assertComparableBenchmarkRuns(baseline, current)
-  const summary = analyzeBenchmarkDrift(
-    baseline,
-    current,
-    DEFAULT_DRIFT_THRESHOLDS,
-  )
+  const summary = analyzeBenchmarkDrift(baseline, current, controls.thresholds)
   const markdown = renderDriftMarkdown(summary)
 
   writeFileSync(controls.summaryPath, markdown)
