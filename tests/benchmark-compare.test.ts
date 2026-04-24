@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { assertComparableBenchmarkRuns } from "../benchmarks/compare.ts"
+import {
+  assertComparableBenchmarkRuns,
+  parseDriftThresholdsFromArgs,
+} from "../benchmarks/compare.ts"
 import {
   BENCHMARK_RESULT_SCHEMA_VERSION,
   type BenchmarkResultsV1,
@@ -62,4 +65,27 @@ test("comparator allows same controls even when runtime differs", () => {
   )
 
   assert.doesNotThrow(() => assertComparableBenchmarkRuns(baseline, current))
+})
+
+test("threshold parser accepts explicit warn/fail values", () => {
+  const thresholds = parseDriftThresholdsFromArgs([
+    "--warn-threshold=12.5",
+    "--fail-threshold=30",
+  ])
+
+  assert.deepEqual(thresholds, {
+    warn_percent: 12.5,
+    fail_percent: 30,
+  })
+})
+
+test("threshold parser rejects fail threshold below warn threshold", () => {
+  assert.throws(
+    () =>
+      parseDriftThresholdsFromArgs([
+        "--warn-threshold=20",
+        "--fail-threshold=10",
+      ]),
+    /--fail-threshold must be greater than or equal to --warn-threshold/,
+  )
 })

@@ -45,7 +45,9 @@ jobs:
             --baseline=benchmarks/baselines/benchmark-baseline.v1.json \
             --current=benchmarks/artifacts/current-benchmark-results.json \
             --summary=benchmarks/artifacts/benchmark-drift-summary.md \
-            --output=benchmarks/artifacts/benchmark-drift-summary.json
+            --output=benchmarks/artifacts/benchmark-drift-summary.json \
+            --warn-threshold=${{ vars.BENCHMARK_WARN_THRESHOLD_PERCENT || '10' }} \
+            --fail-threshold=${{ vars.BENCHMARK_FAIL_THRESHOLD_PERCENT || '25' }}
 
       - name: Publish benchmark summary
         if: always()
