@@ -334,16 +334,40 @@ function isFunctionLikeEntity(entity: CanonicalEntity): boolean {
   )
 }
 
-function createInMemorySourceFile(moduleSourceText: string): SourceFile {
+function createInMemorySourceFile(
+  moduleSourceText: string,
+  modulePath: string,
+): SourceFile {
   const project = new Project({
     useInMemoryFileSystem: true,
     skipAddingFilesFromTsConfig: true,
     skipFileDependencyResolution: true,
   })
+  const extension = path.extname(modulePath).toLowerCase()
+  const sourceExtension = TYPESCRIPT_SOURCE_EXTENSIONS.has(extension)
+    ? extension
+    : ".ts"
 
-  return project.createSourceFile("module.tsx", moduleSourceText, {
-    overwrite: true,
-  })
+  return project.createSourceFile(
+    `module${sourceExtension}`,
+    moduleSourceText,
+    {
+      overwrite: true,
+    },
+  )
+}
+
+function hasCallableBody(node: Node): boolean {
+  if (
+    Node.isFunctionDeclaration(node) ||
+    Node.isMethodDeclaration(node) ||
+    Node.isFunctionExpression(node) ||
+    Node.isArrowFunction(node)
+  ) {
+    return node.getBody() !== undefined
+  }
+
+  return false
 }
 
 function findFunctionLikeNode(
@@ -351,19 +375,23 @@ function findFunctionLikeNode(
   entity: CanonicalEntity,
 ): Node | null {
   if (entity.kind === "method") {
-    return (
-      sourceFile
-        .getDescendantsOfKind(SyntaxKind.MethodDeclaration)
-        .find((method) => method.getName() === entity.name) ?? null
-    )
+    const methods = sourceFile
+      .getDescendantsOfKind(SyntaxKind.MethodDeclaration)
+      .filter((method) => method.getName() === entity.name)
+
+    return methods.find(hasCallableBody) ?? methods[0] ?? null
   }
 
-  const functionDeclaration = sourceFile
+  const functionDeclarations = sourceFile
     .getFunctions()
-    .find((declaration) => declaration.getName() === entity.name)
+    .filter((declaration) => declaration.getName() === entity.name)
 
-  if (functionDeclaration !== undefined) {
-    return functionDeclaration
+  if (functionDeclarations.length > 0) {
+    return (
+      functionDeclarations.find(hasCallableBody) ??
+      functionDeclarations[0] ??
+      null
+    )
   }
 
   for (const declaration of sourceFile.getVariableDeclarations()) {
@@ -385,31 +413,72 @@ function findFunctionLikeNode(
   return null
 }
 
-function countBranches(callable: Node): number {
+function isNestedCallableBoundary(root: Node, node: Node): boolean {
   return (
-    callable.getDescendantsOfKind(SyntaxKind.IfStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.ConditionalExpression).length +
-    callable.getDescendantsOfKind(SyntaxKind.SwitchStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.ForStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.ForInStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.ForOfStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.WhileStatement).length +
-    callable.getDescendantsOfKind(SyntaxKind.DoStatement).length
+    node !== root &&
+    (Node.isFunctionDeclaration(node) ||
+      Node.isArrowFunction(node) ||
+      Node.isFunctionExpression(node) ||
+      Node.isMethodDeclaration(node))
   )
 }
 
+function countScopedDescendants(
+  callable: Node,
+  predicate: (node: Node) => boolean,
+): number {
+  let count = 0
+
+  callable.forEachDescendant((node, traversal) => {
+    if (isNestedCallableBoundary(callable, node)) {
+      traversal.skip()
+      return
+    }
+
+    if (predicate(node)) {
+      count += 1
+    }
+  })
+
+  return count
+}
+
+function isBranchNode(node: Node): boolean {
+  return (
+    Node.isIfStatement(node) ||
+    Node.isConditionalExpression(node) ||
+    Node.isSwitchStatement(node) ||
+    Node.isForStatement(node) ||
+    Node.isForInStatement(node) ||
+    Node.isForOfStatement(node) ||
+    Node.isWhileStatement(node) ||
+    Node.isDoStatement(node)
+  )
+}
+
+function countBranches(callable: Node): number {
+  return countScopedDescendants(callable, isBranchNode)
+}
+
 function countHelperCalls(callable: Node): number {
-  return callable
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .filter((expression) => expression.getExpression().getText() !== "import")
-    .length
+  return countScopedDescendants(
+    callable,
+    (node) =>
+      Node.isCallExpression(node) &&
+      node.getExpression().getText() !== "import",
+  )
+}
+
+function hasTryCatch(callable: Node): boolean {
+  return countScopedDescendants(callable, Node.isTryStatement) > 0
 }
 
 function snapshotFunctionStructure(
   moduleSourceText: string,
+  modulePath: string,
   entity: CanonicalEntity,
 ): FunctionStructuralSnapshot | null {
-  const sourceFile = createInMemorySourceFile(moduleSourceText)
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
   const callable = findFunctionLikeNode(sourceFile, entity)
 
   if (callable === null) {
@@ -420,8 +489,7 @@ function snapshotFunctionStructure(
   const snapshot = {
     branchCount: countBranches(callable),
     helperCallCount: countHelperCalls(callable),
-    hasTryCatch:
-      callable.getDescendantsOfKind(SyntaxKind.TryStatement).length > 0,
+    hasTryCatch: hasTryCatch(callable),
   }
 
   sourceFile.forget()
@@ -454,8 +522,16 @@ function resolveFunctionStructuralDelta(
     return null
   }
 
-  const beforeSnapshot = snapshotFunctionStructure(beforeSourceText, entity)
-  const afterSnapshot = snapshotFunctionStructure(afterSourceText, entity)
+  const beforeSnapshot = snapshotFunctionStructure(
+    beforeSourceText,
+    entity.modulePath,
+    entity,
+  )
+  const afterSnapshot = snapshotFunctionStructure(
+    afterSourceText,
+    entity.modulePath,
+    entity,
+  )
 
   if (beforeSnapshot === null || afterSnapshot === null) {
     return null
@@ -493,8 +569,11 @@ function readFileAtGitRef(
   }
 }
 
-function countModuleImportFanOut(moduleSourceText: string): number {
-  const sourceFile = createInMemorySourceFile(moduleSourceText)
+function countModuleImportFanOut(
+  moduleSourceText: string,
+  modulePath: string,
+): number {
+  const sourceFile = createInMemorySourceFile(moduleSourceText, modulePath)
   const staticImportCount = sourceFile.getImportDeclarations().length
   const exportFromCount = sourceFile
     .getExportDeclarations()
@@ -541,8 +620,8 @@ function resolveModuleImportFanOutDelta(
   }
 
   return {
-    before: countModuleImportFanOut(beforeSourceText),
-    after: countModuleImportFanOut(afterSourceText),
+    before: countModuleImportFanOut(beforeSourceText, modulePath),
+    after: countModuleImportFanOut(afterSourceText, modulePath),
   }
 }
 
