@@ -101,6 +101,23 @@ jobs:
             echo "::warning::Benchmark trend summary missing $missing run(s) from configured window."
           fi
 
+      - name: Emit trend guardrail signal
+        if: always()
+        run: |
+          if [ ! -f benchmarks/artifacts/benchmark-trend-summary.json ]; then
+            echo "::warning::benchmark-trend-summary.json not found; skipping guardrail signal."
+            exit 0
+          fi
+          status=$(node -e "const fs=require('node:fs'); const summary=JSON.parse(fs.readFileSync('benchmarks/artifacts/benchmark-trend-summary.json','utf8')); process.stdout.write(String(summary.guardrail_status || 'warn'));")
+          echo "Trend guardrail status: ${status}"
+          if [ "$status" = "warn" ]; then
+            echo "::warning::Benchmark trend guardrail is WARN. Trend may include runtime variance."
+          fi
+          if [ "$status" = "fail" ]; then
+            echo "::error::Benchmark trend guardrail is FAIL due to control mismatch across trend window."
+            exit 1
+          fi
+
       - name: Upload trend artifacts
         if: always()
         uses: actions/upload-artifact@v4
