@@ -33,6 +33,14 @@ The system MUST define normalized feature, change, and finding contracts that co
 - **WHEN** a changed function-like entity is extracted and comparable base/head callable content is available
 - **THEN** canonical change output includes `structural.branchCount`, `structural.helperCallCount`, and `structural.hasTryCatch` feature deltas
 
+#### Scenario: Phase 3 extraction computes callable signature deltas
+- **WHEN** a changed function-like entity is extracted and comparable base/head callable content is available
+- **THEN** canonical change output includes signature deltas for input arity, optional/defaulted input count, async state, and explicit return category where practical
+
+#### Scenario: Phase 3 extraction computes contract shape deltas
+- **WHEN** a changed contract or type-like entity is extracted and comparable base/head contract content is available
+- **THEN** canonical change output includes signature or shape deltas for member count and optional member count where practical
+
 ### Requirement: Evidence-backed review surface contracts
 The system MUST model findings with structured evidence so reviewers can drill down from conceptual findings to supporting entities, feature deltas, peer anchors, companion candidates, and diff hunks.
 
@@ -46,6 +54,10 @@ The system MUST model findings with structured evidence so reviewers can drill d
 
 #### Scenario: structural delta extraction fails loud with explicit fallback
 - **WHEN** a changed function-like entity cannot be matched in both base and head source snapshots
+- **THEN** canonical change output includes an explicit fallback summary instead of silently emitting zero deltas
+
+#### Scenario: signature delta extraction fails loud with explicit fallback
+- **WHEN** a changed entity cannot be matched in both base and head source snapshots for signature or contract-shape extraction
 - **THEN** canonical change output includes an explicit fallback summary instead of silently emitting zero deltas
 
 ### Requirement: Package boundaries preserve language-agnostic core
