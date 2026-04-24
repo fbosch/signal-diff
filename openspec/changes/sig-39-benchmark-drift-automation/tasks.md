@@ -12,7 +12,7 @@
 
 ## 3. CI Automation And Drift Policy
 
-- [ ] 3.1 Add pull request benchmark workflow with drift comparison.
+- [x] 3.1 Add pull request benchmark workflow with drift comparison.
 - [ ] 3.2 Add scheduled benchmark workflow on `master` for trend collection.
 - [ ] 3.3 Add configurable pass/warn/fail threshold policy.
 
