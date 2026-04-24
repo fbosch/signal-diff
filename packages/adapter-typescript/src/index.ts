@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import path from "node:path"
 import type {
   CanonicalEntity,
@@ -257,19 +258,107 @@ export function createTypeScriptStubEntity(
 
 export function createTypeScriptStubChange(
   entity: CanonicalEntity,
+  repoContext: RepoContext,
 ): EntityChange {
+  const summary = [`Detected a changed ${entity.kind} at ${entity.modulePath}.`]
+  const topologyDeltas: EntityChange["featureDeltas"]["topology"] = {}
+
+  if (entity.kind === "module") {
+    const importFanOutDelta = resolveModuleImportFanOutDelta(
+      repoContext,
+      entity.modulePath,
+    )
+
+    if (importFanOutDelta === null) {
+      summary.push(
+        "Skipped topology.importFanOut delta because base/head module content was unavailable.",
+      )
+    } else {
+      topologyDeltas.importFanOut = importFanOutDelta
+      summary.push(
+        `Module import fan-out changed ${importFanOutDelta.before} -> ${importFanOutDelta.after}.`,
+      )
+    }
+  }
+
   return {
     id: `change:${entity.id}`,
     entityId: entity.id,
     kind: "entity_modified",
     summary: `Detected a changed ${entity.kind} at ${entity.modulePath}.`,
     featureDeltas: {
-      summary: [`Changed ${entity.kind} detected from diff scope.`],
+      summary,
       signature: {},
       structural: {},
       behavioral: {},
-      topology: {},
+      topology: topologyDeltas,
     },
+  }
+}
+
+function readFileAtGitRef(
+  repoRoot: string,
+  gitRef: string,
+  modulePath: string,
+): string | null {
+  try {
+    return execFileSync("git", ["show", `${gitRef}:${modulePath}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+  } catch {
+    return null
+  }
+}
+
+function countModuleImportFanOut(moduleSourceText: string): number {
+  const importFromMatches =
+    moduleSourceText.match(/^\s*import\s+.+\s+from\s+["'][^"']+["']/gm) ?? []
+  const sideEffectImportMatches =
+    moduleSourceText.match(/^\s*import\s+["'][^"']+["']/gm) ?? []
+  const exportFromMatches =
+    moduleSourceText.match(/^\s*export\s+.+\s+from\s+["'][^"']+["']/gm) ?? []
+  const dynamicImportMatches =
+    moduleSourceText.match(/\bimport\s*\(\s*["'][^"']+["']\s*\)/g) ?? []
+
+  return (
+    importFromMatches.length +
+    sideEffectImportMatches.length +
+    exportFromMatches.length +
+    dynamicImportMatches.length
+  )
+}
+
+function resolveModuleImportFanOutDelta(
+  repoContext: RepoContext,
+  modulePath: string,
+): { before: number; after: number } | null {
+  const baseRef = repoContext.resolvedBaseRef
+  const headRef = repoContext.resolvedHeadRef
+
+  if (baseRef === undefined || headRef === undefined) {
+    return null
+  }
+
+  const beforeSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    baseRef,
+    modulePath,
+  )
+  const afterSourceText = readFileAtGitRef(
+    repoContext.repoRoot,
+    headRef,
+    modulePath,
+  )
+
+  if (beforeSourceText === null || afterSourceText === null) {
+    return null
+  }
+
+  return {
+    before: countModuleImportFanOut(beforeSourceText),
+    after: countModuleImportFanOut(afterSourceText),
   }
 }
 
@@ -309,7 +398,9 @@ export function createTypeScriptStubExtractionResult(
     repoContext: request.repoContext,
     entities,
     relationships: [],
-    changes: entities.map((entity) => createTypeScriptStubChange(entity)),
+    changes: entities.map((entity) =>
+      createTypeScriptStubChange(entity, request.repoContext),
+    ),
     diffReferences,
   }
 }
@@ -660,7 +751,9 @@ export function createTypeScriptExtractionResult(
     repoContext: request.repoContext,
     entities,
     relationships: [],
-    changes: entities.map((entity) => createTypeScriptStubChange(entity)),
+    changes: entities.map((entity) =>
+      createTypeScriptStubChange(entity, request.repoContext),
+    ),
     diffReferences,
   }
 }

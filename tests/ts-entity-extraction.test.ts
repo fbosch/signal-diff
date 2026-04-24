@@ -74,6 +74,7 @@ function createEntityFixtureRepo(): {
     repoRoot,
     "packages/app/src/view.tsx",
     [
+      'import { readFileSync } from "node:fs"',
       "export interface UserContract {",
       "  id: string",
       "}",
@@ -100,6 +101,8 @@ function createEntityFixtureRepo(): {
       "  return <aside>legacy</aside>",
       "}",
       "",
+      "void readFileSync",
+      "",
     ].join("\n"),
   )
 
@@ -111,6 +114,8 @@ function createEntityFixtureRepo(): {
     repoRoot,
     "packages/app/src/view.tsx",
     [
+      'import { readFileSync } from "node:fs"',
+      'import path from "node:path"',
       "export interface UserContract {",
       "  id: string",
       "}",
@@ -137,6 +142,9 @@ function createEntityFixtureRepo(): {
       "  return <aside>legacy-updated</aside>",
       "}",
       "",
+      "void readFileSync",
+      "void path",
+      "",
     ].join("\n"),
   )
 
@@ -148,6 +156,9 @@ function createEntityFixtureRepo(): {
     repoRoot,
     "packages/app/src/view.tsx",
     [
+      'import { readFileSync } from "node:fs"',
+      'import path from "node:path"',
+      'import { fileURLToPath } from "node:url"',
       "export interface UserContract {",
       "  id: string",
       "}",
@@ -174,6 +185,10 @@ function createEntityFixtureRepo(): {
       "export const LegacyView = function LegacyView() {",
       "  return <aside>legacy-updated-again</aside>",
       "}",
+      "",
+      "void readFileSync",
+      "void path",
+      "void fileURLToPath",
       "",
     ].join("\n"),
   )
@@ -293,6 +308,104 @@ test("canonical entity ids stay stable across semantic-preserving edits", () => 
     )
 
     assert.deepEqual([...firstIds].sort(), [...secondIds].sort())
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction computes module import fan-out deltas from base/head", () => {
+  const { repoRoot, baseRef, headRef } = createEntityFixtureRepo()
+
+  try {
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef,
+      headRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const moduleEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "module" &&
+        entity.modulePath === "packages/app/src/view.tsx",
+    )
+
+    assert.equal(moduleEntity !== undefined, true)
+
+    const moduleChange = extraction.changes.find(
+      (change) => change.entityId === moduleEntity?.id,
+    )
+
+    assert.equal(moduleChange !== undefined, true)
+    assert.deepEqual(moduleChange?.featureDeltas.topology.importFanOut, {
+      before: 1,
+      after: 3,
+    })
+    assert.equal(
+      moduleChange?.featureDeltas.summary.includes(
+        "Module import fan-out changed 1 -> 3.",
+      ),
+      true,
+    )
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true })
+  }
+})
+
+test("typescript extraction reports explicit fallback when module delta unavailable", () => {
+  const { repoRoot, headRef } = createEntityFixtureRepo()
+
+  try {
+    writeFile(
+      repoRoot,
+      "packages/app/src/new-module.ts",
+      [
+        'import path from "node:path"',
+        'export const normalized = path.normalize("x")',
+      ].join("\n"),
+    )
+    runGit(repoRoot, ["add", "."])
+    runGit(repoRoot, ["commit", "-m", "add module"])
+    const newHeadRef = runGit(repoRoot, ["rev-parse", "HEAD"])
+
+    const repoContext = loadRepoContextFromGit({
+      repoRoot,
+      baseRef: headRef,
+      headRef: newHeadRef,
+    })
+    const extraction = createTypeScriptExtractionResult({
+      repoContext,
+      format: "json",
+      maxFindings: 20,
+      includeDiffHunks: false,
+    })
+    const addedModuleEntity = extraction.entities.find(
+      (entity) =>
+        entity.kind === "module" &&
+        entity.modulePath === "packages/app/src/new-module.ts",
+    )
+
+    assert.equal(addedModuleEntity !== undefined, true)
+
+    const addedModuleChange = extraction.changes.find(
+      (change) => change.entityId === addedModuleEntity?.id,
+    )
+
+    assert.equal(addedModuleChange !== undefined, true)
+    assert.equal(
+      addedModuleChange?.featureDeltas.topology.importFanOut,
+      undefined,
+    )
+    assert.equal(
+      addedModuleChange?.featureDeltas.summary.includes(
+        "Skipped topology.importFanOut delta because base/head module content was unavailable.",
+      ),
+      true,
+    )
   } finally {
     rmSync(repoRoot, { recursive: true, force: true })
   }
