@@ -116,8 +116,10 @@ Actions:
 CI profile controls:
 
 ```bash
-pnpm tsx benchmarks/run.ts --warmup=1 --samples=8 --iterations=25 --json
+pnpm tsx benchmarks/run.ts --json
 ```
+
+This uses the benchmark defaults (`warmup=2`, `samples=12`, `iterations=30`), matching `.github/workflows/benchmark-pr-drift.yml`.
 
 ### Symptom: missing or new scenarios trigger `fail`
 
